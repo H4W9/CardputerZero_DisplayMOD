@@ -1,0 +1,57 @@
+#!/bin/sh
+set -e
+[ "$1" = configure ] || exit 0
+
+# Launcher user: same rule APPLaunch uses (first normal login user)
+U=$(awk -F: '$3>=1000 && $3<65534 && $7 !~ /(nologin|false)$/ {print $1; exit}' /etc/passwd)
+U=${U:-pi}
+
+if [ ! -f /etc/displaymod.conf ]; then
+  cat > /etc/displaymod.conf <<CONF
+# DisplayMOD settings. Change them in the DisplayMOD app.
+MODE=mirror
+BIGTERM=1
+MIRROR_LAYOUT=bar
+DIM_BUILTIN=1
+ROTATE=90
+FONT=6x12
+SPEED=16000000
+BGR=0
+TTY=auto
+DC=23
+RST=22
+LED=26
+USER_NAME=$U
+CONF
+else
+  # Upgrade from 1.x: dual/console modes became mirror
+  sed -i 's/^MODE=dual$/MODE=mirror/; s/^MODE=console$/MODE=mirror/' /etc/displaymod.conf
+fi
+
+# Let the apps run the helper (and only the helper) without a password
+echo "$U ALL=(root) NOPASSWD: /usr/sbin/displaymod-ctl" > /etc/sudoers.d/displaymod.tmp
+chmod 0440 /etc/sudoers.d/displaymod.tmp
+if visudo -cf /etc/sudoers.d/displaymod.tmp >/dev/null; then
+  mv /etc/sudoers.d/displaymod.tmp /etc/sudoers.d/displaymod
+else
+  rm -f /etc/sudoers.d/displaymod.tmp
+  echo "DisplayMOD: sudo rule rejected; the apps will not be able to change settings."
+fi
+
+# Older setups that use the same SPI chip-select
+for s in mirror.service bigscreen.service; do
+  if systemctl is-enabled --quiet "$s" 2>/dev/null; then
+    systemctl disable --now "$s" || true
+    echo "DisplayMOD: disabled $s (it uses the same SPI chip-select)."
+  fi
+done
+# Leftover from DisplayMOD 1.x (system service, now a user service)
+rm -f /etc/systemd/system/multi-user.target.wants/displaymod.service
+systemctl daemon-reload || true
+
+systemctl --global enable displaymod.service >/dev/null 2>&1 || true
+systemctl --user -M "$U@" daemon-reload 2>/dev/null || true
+if ! systemctl --user -M "$U@" restart displaymod.service 2>/dev/null; then
+  /usr/sbin/displaymod-ctl apply || echo "DisplayMOD: start failed; open the DisplayMOD app for status."
+fi
+exit 0

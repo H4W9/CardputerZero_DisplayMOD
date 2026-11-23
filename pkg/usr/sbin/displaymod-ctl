@@ -1,0 +1,384 @@
+#!/bin/sh
+# displaymod-ctl - DisplayMOD helper for the CardputerZero (runs as root).
+# The DisplayMOD apps call this through a narrow sudo rule. Every value
+# passed to "set" is checked against a fixed list before it is used.
+#
+#   displaymod-ctl apply          apply /etc/displaymod.conf now
+#   displaymod-ctl set KEY VALUE  change one setting and apply it
+#   displaymod-ctl set-many K V ...  change several, then apply once
+#   displaymod-ctl get KEY        print one setting
+#   displaymod-ctl get-all        print all settings as KEY=VALUE
+#   displaymod-ctl builtin on|off built-in screen backlight
+#   displaymod-ctl panel-state    prints up, missing or down
+#   displaymod-ctl status         short status, KEY|VALUE lines
+#   displaymod-ctl boot|shutdown  used by the displaymod user service
+#   displaymod-ctl uninstall      remove the package
+
+set -u
+CONF=/etc/displaymod.conf
+RUN=/run/displaymod
+LIB=/usr/lib/displaymod
+V5=/sys/class/leds/ext_5v_out/brightness
+BL=/sys/class/backlight/backlight
+VIEW=displaymod-view.service
+VIEWUNIT=/run/systemd/system/$VIEW
+BT_SRC=$LIB/displaymod-bigterm.desktop
+BT_DST=/usr/share/APPLaunch/applications/displaymod-bigterm.desktop
+KEYS="MODE BIGTERM MIRROR_LAYOUT ALIGN BORDER_COLOR BUILTIN_OFF SLEEP HISTORY HIST_SIZE HIST_DUPS DIM_BUILTIN DETECT BRIGHTNESS ROTATE FONT SPEED BGR TTY DC RST LED"
+
+[ "$(id -u)" = 0 ] || { echo "displaymod-ctl must run as root"; exit 1; }
+
+# ---------- settings ----------
+# shellcheck disable=SC2034  # read via "get" (eval)
+load_conf() {
+  MODE=mirror; BIGTERM=1; MIRROR_LAYOUT=bar; DIM_BUILTIN=1; DETECT=1; BRIGHTNESS=sync
+  BORDER_COLOR=black; ALIGN=center; BUILTIN_OFF=0; SLEEP=5
+  HISTORY=1; HIST_SIZE=1000; HIST_DUPS=1
+  ROTATE=90; FONT=6x12; SPEED=16000000; BGR=0; TTY=auto
+  DC=23; RST=22; LED=26; USER_NAME=pi
+  # shellcheck disable=SC1090
+  [ -f "$CONF" ] && . "$CONF"
+  # settings from v1.0
+  case "$MODE" in dual|console) MODE=mirror ;; esac
+}
+
+valid() { # key value
+  case "$1" in
+    MODE)          case "$2" in off|mirror) return 0 ;; esac ;;
+    MIRROR_LAYOUT) case "$2" in bar|stretch|plain) return 0 ;; esac ;;
+    ALIGN)         case "$2" in top|center|bottom) return 0 ;; esac ;;
+    BORDER_COLOR)  case "$2" in black|charcoal|slate|navy|teal|green|maroon|purple|white) return 0 ;; esac ;;
+    BIGTERM|DIM_BUILTIN|BGR|DETECT|BUILTIN_OFF|HISTORY|HIST_DUPS) case "$2" in 0|1) return 0 ;; esac ;;
+    SLEEP)         case "$2" in 0|1|2|5|10|30) return 0 ;; esac ;;
+    HIST_SIZE)     case "$2" in 100|500|1000|5000) return 0 ;; esac ;;
+    BRIGHTNESS)    case "$2" in sync|10|20|30|40|50|60|70|80|90|100) return 0 ;; esac ;;
+    ROTATE)        case "$2" in 0|90|180|270) return 0 ;; esac ;;
+    FONT)          case "$2" in 8x16|6x12|8x8) return 0 ;; esac ;;
+    SPEED)         case "$2" in 8000000|16000000|24000000|32000000) return 0 ;; esac ;;
+    TTY)           case "$2" in auto|[1-6]) return 0 ;; esac ;;
+    DC|RST|LED)    case "$2" in [0-9]|1[0-9]|2[0-7]) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
+set_key() {
+  valid "$1" "$2" || { echo "Invalid: $1=$2"; exit 2; }
+  if grep -q "^$1=" "$CONF"; then
+    sed -i "s/^$1=.*/$1=$2/" "$CONF"
+  else
+    echo "$1=$2" >> "$CONF"
+  fi
+}
+
+# ---------- helpers ----------
+panel_fb() {
+  for n in /sys/class/graphics/fb*/name; do
+    if grep -q ili9341 "$n" 2>/dev/null; then
+      basename "$(dirname "$n")" | tr -d 'fb'
+      return
+    fi
+  done
+}
+
+builtin_fb() {
+  n=$(grep -i st7789 /proc/fb 2>/dev/null | head -n1 | cut -d' ' -f1)
+  echo "${n:-0}"
+}
+
+pick_tty() {
+  if [ -s "$RUN/tty" ]; then cat "$RUN/tty"; return; fi
+  if [ "$TTY" = auto ]; then
+    t=$(fgconsole 2>/dev/null)
+    case "$t" in [1-9]*) ;; *) t=1 ;; esac
+  else
+    t=$TTY
+  fi
+  echo "$t" > "$RUN/tty"
+  echo "$t"
+}
+
+font_file() {
+  case "$FONT" in
+    8x8)  f=Uni2-VGA8.psf.gz ;;
+    6x12) f=Lat15-Terminus12x6.psf.gz ;;
+    *)    f=Uni2-VGA16.psf.gz ;;
+  esac
+  [ -f "/usr/share/consolefonts/$f" ] && echo "/usr/share/consolefonts/$f"
+}
+
+builtin_bl() { # on | off
+  [ -w "$BL/brightness" ] || return 0
+  if [ "$1" = off ]; then
+    [ -f "$RUN/bl" ] || cat "$BL/brightness" > "$RUN/bl"
+    echo 0 > "$BL/brightness"
+  elif [ -f "$RUN/bl" ]; then
+    v=$(cat "$RUN/bl")
+    [ "${v:-0}" -gt 0 ] 2>/dev/null || v=$(cat "$BL/max_brightness")
+    echo "$v" > "$BL/brightness"
+    rm -f "$RUN/bl"
+  fi
+}
+
+bigterm_entry() { # show the BigTermCLI launcher entry only when enabled
+  if [ "$BIGTERM" = 1 ]; then
+    cmp -s "$BT_SRC" "$BT_DST" || install -m 0644 "$BT_SRC" "$BT_DST"
+  else
+    rm -f "$BT_DST"
+  fi
+}
+
+# ---------- panel ----------
+panel_up() {
+  [ -n "$(panel_fb)" ] && return 0
+  echo 1 > "$V5" 2>/dev/null || echo "Note: could not switch on header 5V"
+  sleep 0.5   # let the panel's regulator settle before probing
+  rm -f "$RUN/notfound"
+  if [ "$DETECT" = 1 ]; then
+    [ -e /dev/spidev0.1 ] || echo spi0.1 > /sys/bus/spi/drivers/spidev/bind 2>/dev/null
+    pinctrl set 9 a0 pu 2>/dev/null   # pull-up: an open SDO line reads FF, not 00
+    "$LIB/displaymod-probe" "$DC" "$RST" 2>"$RUN/probe.log"
+    rc=$?
+    pinctrl set 9 a0 pn 2>/dev/null
+    if [ $rc -eq 1 ]; then
+      echo 0 > "$V5" 2>/dev/null
+      touch "$RUN/notfound"
+      return 3
+    fi
+  fi
+  if [ -e /sys/bus/spi/drivers/spidev/spi0.1 ]; then
+    echo spi0.1 > /sys/bus/spi/drivers/spidev/unbind
+  fi
+  extra=""
+  [ "$BGR" = 1 ] && extra="bgr=on"
+  # Backlight: software PWM on the LED pin for dimming when the kernel has it,
+  # otherwise the display driver switches it on/off.
+  if [ -f /boot/firmware/overlays/pwm-gpio.dtbo ] && dtoverlay pwm-gpio gpio="$LED" 2>/dev/null; then
+    led=""
+  else
+    led="led_pin=$LED"
+  fi
+  # shellcheck disable=SC2086
+  dtoverlay fbtft spi0-1=on ili9341=on dc_pin="$DC" reset_pin="$RST" \
+    $led rotate="$ROTATE" speed="$SPEED" $extra || return 1
+  i=0
+  while [ -z "$(panel_fb)" ] && [ $i -lt 25 ]; do sleep 0.2; i=$((i + 1)); done
+  [ -z "$led" ] && pwm_up
+  [ -n "$(panel_fb)" ]
+}
+
+pwm_up() { # export the pwm-gpio channel and let the mirror (launcher user) set it
+  for c in /sys/class/pwm/pwmchip*; do
+    [ "$(basename "$(readlink -f "$c/device/driver" 2>/dev/null)")" = pwm-gpio ] || continue
+    [ -d "$c/pwm0" ] || echo 0 > "$c/export"
+    sleep 0.1
+    echo 2000000 > "$c/pwm0/period"          # 500 Hz
+    echo 1600000 > "$c/pwm0/duty_cycle"      # 80% until the mirror takes over
+    echo 1 > "$c/pwm0/enable"
+    chown "$USER_NAME" "$c/pwm0/duty_cycle" "$c/pwm0/enable"
+    echo "$c/pwm0" > "$RUN/pwm"
+    return 0
+  done
+}
+
+pwm_down() {
+  if [ -s "$RUN/pwm" ]; then
+    p=$(cat "$RUN/pwm")
+    echo 0 > "$p/enable" 2>/dev/null
+    echo 0 > "$(dirname "$p")/unexport" 2>/dev/null
+    rm -f "$RUN/pwm"
+  fi
+  dtoverlay -l 2>/dev/null | grep -q pwm-gpio && dtoverlay -r pwm-gpio 2>/dev/null
+  return 0
+}
+
+panel_down() {
+  pwm_down
+  dtoverlay -r fbtft 2>/dev/null
+  echo 0 > "$V5" 2>/dev/null
+}
+
+map_tty() { # tty: the console BigTermCLI uses on the EXT display
+  con2fbmap "$1" "$(panel_fb)" || return 1
+  echo 0 > /sys/class/graphics/fbcon/cursor_blink 2>/dev/null
+  f=$(font_file)
+  [ -n "$f" ] && setfont -C "/dev/tty$1" "$f" 2>/dev/null
+  return 0
+}
+
+unmap_tty() {
+  [ -s "$RUN/tty" ] || return 0
+  t=$(cat "$RUN/tty")
+  setfont -C "/dev/tty$t" 2>/dev/null
+  con2fbmap "$t" "$(builtin_fb)" 2>/dev/null
+  if [ "$(cat "$RUN/getty_was" 2>/dev/null)" = active ]; then
+    systemctl start "getty@tty$t.service" 2>/dev/null
+  fi
+  rm -f "$RUN/tty"
+}
+
+console_quiet() { # graphics|text: stop the console drawing on the built-in screen
+  t=$(fgconsole 2>/dev/null)
+  case "$t" in [1-9]*) ;; *) t=1 ;; esac
+  "$LIB/displaymod-probe" vt "$t" "$1" 2>/dev/null
+}
+
+write_view_unit() { # tty
+  mkdir -p /run/systemd/system
+  cat > "$VIEWUNIT" <<EOF
+[Unit]
+Description=DisplayMOD mirror
+Conflicts=getty@tty$1.service
+After=getty@tty$1.service
+
+[Service]
+User=$USER_NAME
+Environment=TERM=linux
+TTYPath=/dev/tty$1
+StandardInput=tty
+StandardOutput=tty
+TTYReset=yes
+TTYVHangup=yes
+ExecStart=$LIB/displaymod-mirror
+Restart=always
+RestartSec=2
+EOF
+  systemctl daemon-reload
+}
+
+# ---------- modes ----------
+mode_mirror() {
+  panel_up
+  case $? in
+    0) ;;
+    3) console_quiet graphics; echo "No EXT display detected (check wiring, SDO on pin 11)"; return 0 ;;
+    *) echo "EXT display did not start. See: dmesg | grep fbtft"; return 1 ;;
+  esac
+  t=$(pick_tty)
+  [ -f "$RUN/getty_was" ] || systemctl is-active "getty@tty$t.service" > "$RUN/getty_was" 2>/dev/null
+  map_tty "$t" || { echo "Could not attach tty$t to the EXT display"; return 1; }
+  write_view_unit "$t"
+  systemctl restart "$VIEW"
+}
+
+mode_off() {
+  systemctl stop "$VIEW" 2>/dev/null
+  unmap_tty
+  panel_down
+  rm -f "$VIEWUNIT"
+  systemctl daemon-reload
+  builtin_bl on
+  # never leave the built-in screen dark once the EXT display is off
+  if [ -w "$BL/brightness" ] && [ "$(cat "$BL/brightness")" = 0 ]; then
+    cat "$BL/max_brightness" > "$BL/brightness"
+  fi
+  console_quiet "${1:-graphics}"
+}
+
+apply() {
+  mkdir -p "$RUN"
+  bigterm_entry
+  case "$MODE" in
+    off)    mode_off ;;
+    mirror) mode_mirror ;;
+  esac
+}
+
+reload_panel() {
+  systemctl stop "$VIEW" 2>/dev/null
+  unmap_tty
+  panel_down
+  apply
+}
+
+status() {
+  p=$(panel_fb)
+  echo "Mode|$MODE"
+  if [ -n "$p" ]; then echo "EXT display|ILI9341 on fb$p"
+  elif [ -f "$RUN/notfound" ]; then echo "EXT display|not detected"
+  else echo "EXT display|off"; fi
+  echo "Mirror|$(systemctl is-active "$VIEW" 2>/dev/null)"
+  if [ "$BIGTERM" = 1 ]; then echo "BigTermCLI|installed"; else echo "BigTermCLI|not installed"; fi
+  [ -r "$BL/brightness" ] && echo "Built-in light|$(cat "$BL/brightness")"
+  echo "Free RAM|$(awk '/MemAvailable/ {printf "%d MB", $2/1024}' /proc/meminfo)"
+  pid=$(systemctl show -p MainPID --value "$VIEW" 2>/dev/null)
+  if [ -n "$pid" ] && [ "$pid" != 0 ]; then
+    echo "Mirror RAM|$(awk '/VmRSS/ {printf "%d KB", $2}' "/proc/$pid/status" 2>/dev/null)"
+  fi
+  [ -r "$V5" ] && echo "Header 5V|$(cat "$V5")"
+}
+
+# ---------- main ----------
+load_conf
+cmd=${1:-}
+case "$cmd" in
+  apply) apply ;;
+  set)
+    [ $# -eq 3 ] || { echo "Usage: set KEY VALUE"; exit 2; }
+    set_key "$2" "$3"
+    load_conf
+    case "$2" in
+      DC|RST|LED|ROTATE|SPEED|BGR) if [ "$MODE" = off ]; then bigterm_entry; else reload_panel; fi ;;
+      DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|HISTORY|HIST_SIZE|HIST_DUPS) ;;   # read live by BigTermCLI / the mirror
+      BIGTERM) bigterm_entry ;;
+      TTY|FONT) if [ "$MODE" = off ]; then bigterm_entry; else systemctl stop "$VIEW" 2>/dev/null; unmap_tty; apply; fi ;;
+      *) apply ;;
+    esac
+    ;;
+  set-many)
+    shift
+    if [ $# -lt 2 ] || [ $(( $# % 2 )) -ne 0 ]; then echo "Usage: set-many KEY VALUE ..."; exit 2; fi
+    n=$#; i=1
+    while [ $i -lt $n ]; do          # check everything before changing anything
+      eval "k=\${$i} v=\${$((i + 1))}"
+      valid "$k" "$v" || { echo "Invalid: $k=$v"; exit 2; }
+      i=$((i + 2))
+    done
+    need=""
+    while [ $# -ge 2 ]; do
+      set_key "$1" "$2"
+      case "$1" in
+        DC|RST|LED|ROTATE|SPEED|BGR) need=panel ;;
+        TTY|FONT) [ "$need" = panel ] || need=console ;;
+        DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|HISTORY|HIST_SIZE|HIST_DUPS|BIGTERM) ;;
+        *) [ -n "$need" ] || need=apply ;;
+      esac
+      shift 2
+    done
+    load_conf
+    if [ "$MODE" = off ]; then
+      apply
+    else
+      case "$need" in
+        panel)   reload_panel ;;
+        console) systemctl stop "$VIEW" 2>/dev/null; unmap_tty; apply ;;
+        apply)   apply ;;
+        *)       bigterm_entry ;;
+      esac
+    fi
+    ;;
+  get)
+    case " $KEYS " in
+      *" ${2:-x} "*) eval "echo \$$2" ;;
+      *) exit 2 ;;
+    esac ;;
+  get-all)
+    for k in $KEYS; do eval "echo $k=\$$k"; done ;;
+  builtin)
+    mkdir -p "$RUN"
+    case "${2:-}" in on|off) builtin_bl "$2" ;; *) exit 2 ;; esac ;;
+  panel-state)
+    if [ -n "$(panel_fb)" ]; then echo up
+    elif [ -f "$RUN/notfound" ]; then echo missing
+    else echo down; fi ;;
+  status) status ;;
+  boot)
+    mkdir -p "$RUN"
+    bigterm_entry
+    [ "$MODE" = off ] || apply ;;
+  shutdown) mode_off text ;;
+  uninstall)
+    mode_off text
+    echo "Removing DisplayMOD..."
+    exec apt-get remove -y displaymod ;;
+  *) sed -n '2,16p' "$0"; exit 2 ;;
+esac

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=BigTermCLI
+Exec=/usr/bin/displaymod-term
+Terminal=false
+Icon=share/images/displaymod_bigterm_100.png
+Type=Application

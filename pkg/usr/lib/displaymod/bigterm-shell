@@ -1,0 +1,3 @@
+#!/bin/sh
+# Shell for the BigTermCLI session: bash with DisplayMOD's history settings.
+exec bash --rcfile /usr/lib/displaymod/bigterm.bashrc -i
