@@ -47,9 +47,10 @@ int dm_poll(int *rc)
 int dm_status(dm_pair_t *out, int max)
 {
     static const dm_pair_t s[] = {
+        /* same lines as displaymod-ctl status (original edition) */
         {"Mode", "mirror"}, {"EXT display", "ILI9341 on fb1"}, {"Mirror", "active"},
         {"BigTermCLI", "installed"}, {"Built-in light", "80"}, {"Free RAM", "263 MB"},
-        {"Mirror RAM", "1180 KB"}, {"Header 5V", "1"},
+        {"Mirror RAM", "1180 KB"}, {"Header 5V", "255"},
     };
     int n = 0;
     for (; n < max && n < (int)(sizeof s / sizeof s[0]); n++) out[n] = s[n];

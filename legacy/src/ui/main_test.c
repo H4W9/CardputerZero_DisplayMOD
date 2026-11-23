@@ -12,6 +12,11 @@
 #define W 320
 #define H 170
 
+/* DM_EXT_SIZE=WxH (e.g. 320x240) adds the EXT display view; each snap then
+ * also writes NAME_ext.ppm. */
+typedef struct { uint16_t *fb; int w, h; } screen_t;
+static screen_t g_scr[2];
+
 static uint32_t g_ms;
 static uint16_t g_fb[W * H];
 static uint32_t g_q[64];
@@ -23,9 +28,10 @@ static uint32_t tick(void) { return g_ms; }
 
 static void flush(lv_display_t *d, const lv_area_t *a, uint8_t *px)
 {
+    screen_t *sc = lv_display_get_user_data(d);
     const uint16_t *s = (const uint16_t *)px;
     for (int y = a->y1; y <= a->y2; y++)
-        for (int x = a->x1; x <= a->x2; x++) g_fb[y * W + x] = *s++;
+        for (int x = a->x1; x <= a->x2; x++) sc->fb[y * sc->w + x] = *s++;
     lv_display_flush_ready(d);
 }
 
@@ -51,18 +57,25 @@ static void run(int ms)
     for (int t = 0; t < ms; t += 10) { g_ms += 10; lv_timer_handler(); }
 }
 
-static void snap(const char *dir, const char *name)
+static void snap_one(const char *dir, const char *name, const char *suffix, const screen_t *sc)
 {
     char p[256];
-    snprintf(p, sizeof p, "%s/%s.ppm", dir, name);
+    snprintf(p, sizeof p, "%s/%s%s.ppm", dir, name, suffix);
     FILE *f = fopen(p, "wb");
-    fprintf(f, "P6\n%d %d\n255\n", W, H);
-    for (int i = 0; i < W * H; i++) {
-        uint16_t c = g_fb[i];
+    if (!f) return;
+    fprintf(f, "P6\n%d %d\n255\n", sc->w, sc->h);
+    for (int i = 0; i < sc->w * sc->h; i++) {
+        uint16_t c = sc->fb[i];
         unsigned char rgb[3] = {(c >> 11) << 3, ((c >> 5) & 63) << 2, (c & 31) << 3};
         fwrite(rgb, 1, 3, f);
     }
     fclose(f);
+}
+
+static void snap(const char *dir, const char *name)
+{
+    snap_one(dir, name, "", &g_scr[0]);
+    if (g_scr[1].fb) snap_one(dir, name, "_ext", &g_scr[1]);
 }
 
 int main(int argc, char **argv)
@@ -70,10 +83,28 @@ int main(int argc, char **argv)
     if (argc < 3) return 2;
     lv_init();
     lv_tick_set_cb(tick);
+    lv_display_t *disps[2];
+    int nd = 0;
+    g_scr[0] = (screen_t){g_fb, W, H};
     lv_display_t *d = lv_display_create(W, H);
     static uint16_t buf[W * 40];
     lv_display_set_buffers(d, buf, NULL, sizeof buf, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(d, flush);
+    lv_display_set_user_data(d, &g_scr[0]);
+    disps[nd++] = d;
+
+    int ew = 0, eh = 0;
+    const char *es = getenv("DM_EXT_SIZE");
+    if (es && sscanf(es, "%dx%d", &ew, &eh) == 2 && ew > 0 && eh > 0 && ew <= 480 && eh <= 480) {
+        g_scr[1] = (screen_t){calloc((size_t)ew * eh, 2), ew, eh};
+        lv_display_t *d2 = lv_display_create(ew, eh);
+        static uint16_t buf2[480 * 40];
+        lv_display_set_buffers(d2, buf2, NULL, sizeof buf2, LV_DISPLAY_RENDER_MODE_PARTIAL);
+        lv_display_set_flush_cb(d2, flush);
+        lv_display_set_user_data(d2, &g_scr[1]);
+        disps[nd++] = d2;
+        lv_display_set_default(d);
+    }
 
     lv_indev_t *kp = lv_indev_create();
     lv_indev_set_type(kp, LV_INDEV_TYPE_KEYPAD);
@@ -82,7 +113,7 @@ int main(int argc, char **argv)
     lv_indev_set_group(kp, g);
 
     dm_load();
-    ui_create(g, &d, 1);
+    ui_create(g, disps, nd);
     run(300);
 
     char *script = strdup(argv[2]);

@@ -1,5 +1,5 @@
 Package: displaymod
-Version: 2.8.2
+Version: 2.8.3
 Section: APPLaunch
 Priority: optional
 Architecture: arm64

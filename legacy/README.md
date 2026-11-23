@@ -5,7 +5,7 @@
 
 Second screen for the M5Stack CardputerZero. DisplayMOD drives a 2.8" ILI9341 SPI display (the EXT display) from the EXT header and mirrors the built-in screen onto it. It also includes BigTermCLI, a full-size terminal that runs on the EXT display.
 
-![Home](screenshots/app_home.png) ![EXT display mirroring](screenshots/ext_mirror_statusbar.png)
+![Built-in screen](screenshots/app_home.png) ![Settings app on the EXT display](screenshots/app_home_ext.png)
 
 ## Features
 
@@ -41,7 +41,7 @@ Leave the touch (T_*) and SD pins unconnected and don't use pin 2 (5V in). Power
 Copy the `.deb` to the CardputerZero, then:
 
 ```
-sudo apt install ./displaymod_2.8.2_arm64.deb
+sudo apt install ./displaymod_2.8.3_arm64.deb
 sudo reboot
 ```
 

@@ -132,7 +132,6 @@ static const char *const BRIGHT_V[] = {"sync", "10", "20", "30", "40", "50", "60
 static const char *const BRIGHT_N[] = {"Match built-in", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", NULL};
 static const char *const SPEED_V[] = {"8000000", "16000000", "24000000", "32000000", NULL};
 static const char *const SPEED_N[] = {"8 MHz", "16 MHz", "24 MHz", "32 MHz", NULL};
-static const char *const GPIO_V[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", NULL};
 
 enum { ACT_UNINSTALL = 1, ACT_CANCEL = 2, ACT_EXIT = 3, ACT_RECHECK = 4, ACT_CLEAR_HIST = 5,
        ACT_APPLY = 6, ACT_APPLY_EXIT = 7 };
@@ -159,9 +158,7 @@ static const item_t SCREEN[] = {
     {K_PICK, "SPI speed", "SPEED", SPEED_V, SPEED_N, NULL, NULL, 0},
     {K_TOGGLE, "Swap red / blue", "BGR", NULL, NULL, "1", "0", 0},
     {K_TOGGLE, "Start only if detected", "DETECT", NULL, NULL, "1", "0", 0},
-    {K_PICK, "DC pin (GPIO)", "DC", GPIO_V, GPIO_V, NULL, NULL, 0},
-    {K_PICK, "Reset pin (GPIO)", "RST", GPIO_V, GPIO_V, NULL, NULL, 0},
-    {K_PICK, "LED pin (GPIO)", "LED", GPIO_V, GPIO_V, NULL, NULL, 0},
+    {K_INFO, "Pins DC / RST / LED", NULL, NULL, NULL, NULL, NULL, 0},   /* fixed: 23 / 22 / 26 */
 };
 static const item_t HISTORY[] = {
     {K_TOGGLE, "Save command history", "HISTORY", NULL, NULL, "1", "0", 0},
@@ -499,6 +496,11 @@ static lv_obj_t *make_row(const item_t *it, int idx, int focusable)
     } else if (it->kind == K_LINK) {
         lv_obj_t *v = text(row, LV_SYMBOL_RIGHT, &lv_font_montserrat_12, C_DIM);
         lv_obj_align(v, LV_ALIGN_RIGHT_MID, 0, 0);
+    } else if (it->kind == K_INFO && it->key == NULL && g_page == P_SCREEN) {
+        char buf[48];
+        snprintf(buf, sizeof buf, "%s / %s / %s", dm_get("DC"), dm_get("RST"), dm_get("LED"));
+        lv_obj_t *v = text(row, buf, &lv_font_montserrat_12, C_DIM);
+        lv_obj_align(v, LV_ALIGN_RIGHT_MID, 0, 0);
     } else if (it->kind == K_BUTTON) {
         lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
         if (it->target == ACT_UNINSTALL) {
@@ -613,7 +615,7 @@ static void build_view(enum page pg, int chip, const dm_pair_t *st, int stn)
     }
     switch (pg) {
     case P_HOME:    lv_label_set_text(g_title, "DisplayMOD"); items = HOME; n = 12; break;
-    case P_SCREEN:  lv_label_set_text(g_title, "EXT display"); items = SCREEN; n = 10; break;
+    case P_SCREEN:  lv_label_set_text(g_title, "EXT display"); items = SCREEN; n = 8; break;
     case P_CONFIRM: lv_label_set_text(g_title, "Uninstall"); items = CONFIRM; n = 4; break;
     case P_STATUS:  lv_label_set_text(g_title, "Status"); status_rows(st, stn); break;
     case P_WIRING:  lv_label_set_text(g_title, "Wiring help"); wiring_rows(); break;
@@ -655,7 +657,6 @@ static void build_view(enum page pg, int chip, const dm_pair_t *st, int stn)
         make_row(&items[i], fi, focusable);
         if (focusable) fi++;
     }
-    if (pg == P_STATUS) lv_obj_scroll_to_y(g_list, 0, LV_ANIM_OFF);   /* show info first */
 }
 
 static void build_page(void)
@@ -676,6 +677,8 @@ static void build_page(void)
         if (g_focus_idx >= (int)cnt) g_focus_idx = cnt - 1;
         lv_group_focus_obj(lv_group_get_obj_by_index(g_group, g_focus_idx));
     }
+    if (pg == P_STATUS)                            /* show info first (focus scrolled to the button) */
+        for (int v = 0; v < g_nv; v++) lv_obj_scroll_to_y(g_v[v].list, 0, LV_ANIM_OFF);
 }
 
 static void create_view(int i, lv_display_t *disp)
