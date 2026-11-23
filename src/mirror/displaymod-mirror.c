@@ -13,7 +13,8 @@
  * Runs as the launcher user on the EXT display's tty (systemd TTYPath).
  * Settings: /etc/displaymod.conf (MIRROR_LAYOUT, BIGTERM, BRIGHTNESS).
  * Built-in screen: optionally kept off while mirroring (BUILTIN_OFF); the big
- * screen then sleeps after SLEEP minutes without a key press.
+ * screen then sleeps after SLEEP minutes without a key press. Not applied while
+ * BigTermCLI is open; it follows DIM_BUILTIN instead.
  * Brightness: software PWM on the LED pin (/run/displaymod/pwm), either
  * matching the built-in backlight or a fixed 10-100%. Never 0 while on.
  *
@@ -542,7 +543,8 @@ int main(void)
             int on, pct;
             if (g_builtin_off) {
                 long b;
-                if (read_int(BL_PATH, &b) == 0 && b > 0) {
+                /* BigTermCLI may be starting: it sets the built-in itself (DIM_BUILTIN) */
+                if (access(flag, F_OK) != 0 && read_int(BL_PATH, &b) == 0 && b > 0) {
                     saved_level = b;
                     FILE *lf = fopen(level_file, "w");
                     if (lf) { fprintf(lf, "%ld", b); fclose(lf); }

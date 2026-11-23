@@ -11,7 +11,7 @@ Second screen for the M5Stack CardputerZero. DisplayMOD drives a 2.8" ILI9341 SP
 - BigTermCLI: terminal on the EXT display with the same keys and colors as the CLI app
 - Command history in BigTermCLI, saved after every command and kept across reboots
 - Brightness follows the built-in screen, or set it yourself (10–100%)
-- Option to keep the built-in screen off while mirroring, with an idle sleep timer
+- Option to keep the built-in screen off while mirroring, with an idle sleep timer (BigTermCLI has its own setting for the built-in screen)
 - EXT display detection at boot; if nothing is connected, the 5V output and driver stay off
 - Settings in the DisplayMOD launcher app, or with the `displaymod` command over SSH
 

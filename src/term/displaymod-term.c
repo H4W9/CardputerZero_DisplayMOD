@@ -356,15 +356,17 @@ int main(void)
     snprintf(flag, sizeof flag, "/run/user/%u/displaymod-bigterm", (unsigned)getuid());
     close(open(flag, O_CREAT | O_WRONLY, 0644));
 
-    /* With "Built-in off while mirroring", the mirror already keeps the
-     * backlight off and pauses that while BigTermCLI runs. */
+    /* "Built-in off while mirroring" does not apply here: the built-in
+     * follows DIM_BUILTIN only. The mirror stops forcing it off once the
+     * flag above exists, and forces it off again after we leave. */
     int dimmed = 0, lightctl = strcmp(boff, "1") != 0;
+    long lvl = 0;
+    uint64_t relight_at = 0;
     if (!strcmp(dim, "1")) {
         dimmed = 1;
         if (lightctl) builtin_light(0);
         else { FILE *b = fopen("/sys/class/backlight/backlight/brightness", "w"); if (b) { fputs("0", b); fclose(b); } }
     } else if (!lightctl) {
-        long lvl = 0;
         char lf[64];
         snprintf(lf, sizeof lf, "/run/user/%u/displaymod-builtin-level", (unsigned)getuid());
         FILE *f = fopen(lf, "r");
@@ -372,6 +374,7 @@ int main(void)
         if (lvl <= 0) read_int("/sys/class/backlight/backlight/max_brightness", &lvl);
         FILE *b = fopen("/sys/class/backlight/backlight/brightness", "w");
         if (b) { fprintf(b, "%ld", lvl); fclose(b); }
+        relight_at = now_ms() + 700;   /* once more, after the mirror has seen the flag */
     }
 
     int shift = 0, ctrl = 0, alt = 0, fn = 0, help = 0, scrolled = 0;
@@ -382,6 +385,16 @@ int main(void)
         struct pollfd pf[2] = {{kfd, POLLIN, 0}, {pty, POLLIN, 0}};
         poll(pf, 2, esc_down ? 100 : 500);
         uint64_t t = now_ms();
+
+        if (relight_at && t >= relight_at) {
+            long cur_bl = 0;
+            relight_at = 0;
+            if (read_int("/sys/class/backlight/backlight/brightness", &cur_bl) == 0 && cur_bl == 0) {
+                FILE *b = fopen("/sys/class/backlight/backlight/brightness", "w");
+                if (b) { fprintf(b, "%ld", lvl); fclose(b); }
+                force = 1;
+            }
+        }
 
         /* Drain tmux client output (not shown here) and notice when it ends */
         char junk[4096];
