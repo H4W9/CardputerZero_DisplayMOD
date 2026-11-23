@@ -1,4 +1,4 @@
-/* Device backend: runs "sudo -n /usr/sbin/displaymod-ctl ..." without a shell. */
+/* Device backend: runs "sudo -n /usr/lib/displaymod/displaymod-ctl ..." without a shell. */
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <signal.h>
@@ -10,7 +10,7 @@
 
 #include "backend.h"
 
-#define CTL "/usr/sbin/displaymod-ctl"
+#define CTL "/usr/lib/displaymod/displaymod-ctl"
 #define MAX_KEYS 24
 
 static dm_pair_t g_set[MAX_KEYS];

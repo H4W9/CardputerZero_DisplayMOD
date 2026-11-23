@@ -11,7 +11,7 @@
 #   displaymod-ctl builtin on|off built-in screen backlight
 #   displaymod-ctl panel-state    prints up, missing or down
 #   displaymod-ctl status         short status, KEY|VALUE lines
-#   displaymod-ctl boot|shutdown  used by the displaymod user service
+#   displaymod-ctl boot|shutdown  used by displaymod.service at boot
 #   displaymod-ctl uninstall      remove the package
 
 set -u

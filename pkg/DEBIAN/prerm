@@ -1,12 +1,10 @@
 #!/bin/sh
 set -e
-U=$(sed -n 's/^USER_NAME=//p' /etc/displaymod.conf 2>/dev/null)
-U=${U:-pi}
 if [ "$1" = remove ] || [ "$1" = upgrade ]; then
-  systemctl --user -M "$U@" stop displaymod.service 2>/dev/null || true
-  /usr/sbin/displaymod-ctl shutdown 2>/dev/null || true
+  systemctl stop displaymod.service 2>/dev/null || true
+  /usr/lib/displaymod/displaymod-ctl shutdown 2>/dev/null || true
 fi
 if [ "$1" = remove ]; then
-  systemctl --global disable displaymod.service 2>/dev/null || true
+  systemctl disable displaymod.service 2>/dev/null || true
 fi
 exit 0

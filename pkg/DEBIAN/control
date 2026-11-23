@@ -1,10 +1,10 @@
 Package: displaymod
-Version: 2.7.1
+Version: 2.7.2
 Section: APPLaunch
 Priority: optional
 Architecture: arm64
 Depends: tmux, fbset, kbd, sudo
-Maintainer: H4W9
+Maintainer: H4W9 <H4W9@users.noreply.github.com>
 Description: Second screen for the M5Stack CardputerZero
  DisplayMOD adds a 2.8" ILI9341 SPI display (EXT display) on the EXT header.
  It mirrors the built-in screen 1:1 with a status bar in the spare rows, and

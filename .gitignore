@@ -7,3 +7,4 @@ pkg/usr/bin/displaymod-ui
 pkg/usr/bin/displaymod-term
 pkg/usr/lib/displaymod/displaymod-mirror
 pkg/usr/lib/displaymod/displaymod-probe
+build/

@@ -5,7 +5,7 @@
 # Quick settings apply at once; settings that restart the EXT display are
 # queued (shown with *) until you press p to apply them together.
 
-CTL=(sudo -n /usr/sbin/displaymod-ctl)
+CTL=(sudo -n /usr/lib/displaymod/displaymod-ctl)
 HIST="$HOME/.local/share/displaymod/bigterm_history"
 
 declare -A PEND

@@ -38,7 +38,7 @@
 
 #include "../common/dmdraw.h"
 
-#define CTL       "/usr/sbin/displaymod-ctl"
+#define CTL       "/usr/lib/displaymod/displaymod-ctl"
 #define HELP_FILE "/usr/lib/displaymod/bigterm-help.txt"
 #define KEYMAP    "/usr/share/keymaps/tca8418_keypad_m5stack_keymap.map"
 #ifndef KEY_FN

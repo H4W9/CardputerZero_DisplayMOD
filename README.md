@@ -38,7 +38,7 @@ Leave the touch (T_*) and SD pins unconnected and don't use pin 2 (5V in). Power
 Copy the `.deb` to the CardputerZero, then:
 
 ```
-sudo apt install ./displaymod_2.7.0_arm64.deb
+sudo apt install ./displaymod_2.7.2_arm64.deb
 sudo reboot
 ```
 
@@ -85,9 +85,18 @@ Needs an arm64 cross compiler (`aarch64-linux-gnu-gcc`), `make`, `git` and `dpkg
 
 LVGL 9.2.2 is fetched into `src/ui/lvgl` on the first build.
 
+On Windows (or without gcc and dpkg-deb), build with zig instead. Every run is a clean build:
+
+```
+pip install --user ziglang
+python tools/build_win.py
+```
+
+The .deb goes into `dist/`. `tools\deploy.cmd IP` copies it to the CardputerZero and installs it.
+
 ## How it works
 
-- `displaymod-ctl` (root) loads the kernel `fbtft` driver for the display, the `pwm-gpio` overlay for brightness, and starts the mirror. The apps reach it through a sudo rule that only allows this helper.
+- `displaymod-ctl` (root, in `/usr/lib/displaymod`) loads the kernel `fbtft` driver for the display, the `pwm-gpio` overlay for brightness, and starts the mirror. The apps reach it through a sudo rule that only allows this helper.
 - `displaymod-mirror` copies changed rows from the built-in framebuffer to the EXT display and draws the status bar.
 - `displaymod-term` (BigTermCLI) sends keys to a tmux session that the EXT display shows.
 - `displaymod-ui` is the settings app (LVGL).

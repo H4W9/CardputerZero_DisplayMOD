@@ -28,8 +28,13 @@ else
   sed -i 's/^MODE=dual$/MODE=mirror/; s/^MODE=console$/MODE=mirror/' /etc/displaymod.conf
 fi
 
-# Let the apps run the helper (and only the helper) without a password
-echo "$U ALL=(root) NOPASSWD: /usr/sbin/displaymod-ctl" > /etc/sudoers.d/displaymod.tmp
+# System user for the boot service (the store does not allow root services)
+if ! id displaymod >/dev/null 2>&1; then
+  useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin displaymod
+fi
+
+# Let the apps and the boot service run the helper (and only the helper) without a password
+echo "$U,displaymod ALL=(root) NOPASSWD: /usr/lib/displaymod/displaymod-ctl" > /etc/sudoers.d/displaymod.tmp
 chmod 0440 /etc/sudoers.d/displaymod.tmp
 if visudo -cf /etc/sudoers.d/displaymod.tmp >/dev/null; then
   mv /etc/sudoers.d/displaymod.tmp /etc/sudoers.d/displaymod
@@ -45,13 +50,13 @@ for s in mirror.service bigscreen.service; do
     echo "DisplayMOD: disabled $s (it uses the same SPI chip-select)."
   fi
 done
-# Leftover from DisplayMOD 1.x (system service, now a user service)
-rm -f /etc/systemd/system/multi-user.target.wants/displaymod.service
+# Leftover from DisplayMOD 2.0-2.7.1 (user service, now a system service)
+rm -f /etc/systemd/user/default.target.wants/displaymod.service
+systemctl --user -M "$U@" daemon-reload 2>/dev/null || true
 systemctl daemon-reload || true
 
-systemctl --global enable displaymod.service >/dev/null 2>&1 || true
-systemctl --user -M "$U@" daemon-reload 2>/dev/null || true
-if ! systemctl --user -M "$U@" restart displaymod.service 2>/dev/null; then
-  /usr/sbin/displaymod-ctl apply || echo "DisplayMOD: start failed; open the DisplayMOD app for status."
+systemctl enable displaymod.service >/dev/null 2>&1 || true
+if ! systemctl restart displaymod.service 2>/dev/null; then
+  /usr/lib/displaymod/displaymod-ctl apply || echo "DisplayMOD: start failed; open the DisplayMOD app for status."
 fi
 exit 0

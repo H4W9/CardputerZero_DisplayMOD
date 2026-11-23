@@ -1,0 +1,14 @@
+[Unit]
+Description=DisplayMOD second screen
+After=local-fs.target systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=displaymod
+ExecStart=/usr/bin/sudo -n /usr/lib/displaymod/displaymod-ctl boot
+ExecStop=/usr/bin/sudo -n /usr/lib/displaymod/displaymod-ctl shutdown
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
