@@ -11,7 +11,10 @@
  * changing. Blanks the EXT display when the built-in backlight is off.
  *
  * Runs as the launcher user on the EXT display's tty (systemd TTYPath).
- * Settings: /etc/displaymod.conf (MIRROR_LAYOUT, BIGTERM, BRIGHTNESS).
+ * Settings: /etc/displaymod/displaymod.conf (MIRROR_LAYOUT, BIGTERM, BRIGHTNESS).
+ * Store edition: started by displaymod-daemon on the EXT console (as the
+ * service user). BigTermCLI starts its own viewer on that console; while
+ * /run/displaymod/bigterm exists this only switches it to text mode.
  * Built-in screen: optionally kept off while mirroring (BUILTIN_OFF); the big
  * screen then sleeps after SLEEP minutes without a key press. Not applied while
  * BigTermCLI is open; it follows DIM_BUILTIN instead.
@@ -47,7 +50,8 @@
 
 #include "../common/dmdraw.h"
 
-#define VIEW_SH "/usr/lib/displaymod/view.sh"
+#define RUN_DIR "/run/displaymod"
+#define CONF_PATH "/etc/displaymod/displaymod.conf"
 #define BL_PATH "/sys/class/backlight/backlight/brightness"
 
 typedef struct {
@@ -83,7 +87,7 @@ static uint64_t now_ms(void)
 static void load_conf(void)
 {
     const char *path = getenv("DM_CONF");
-    FILE *f = fopen(path ? path : "/etc/displaymod.conf", "r");
+    FILE *f = fopen(path ? path : CONF_PATH, "r");
     if (!f) return;
     char line[128];
     while (fgets(line, sizeof line, f)) {
@@ -336,23 +340,17 @@ static void bar_step(mirror_t *m, int info_tick)
 
 /* -------------------------------------------------------------- BigTermCLI */
 
-static pid_t start_term(void)
+/* BigTermCLI's viewer draws on this console in text mode; tell the daemon
+ * once the switch is done. */
+static void start_term(void)
 {
     ioctl(0, KDSETMODE, KD_TEXT);
-    pid_t pid = fork();
-    if (pid == 0) {
-        execl("/bin/sh", "sh", VIEW_SH, (char *)NULL);
-        _exit(127);
-    }
-    return pid;
+    close(open(RUN_DIR "/bigterm-ack", O_CREAT | O_WRONLY, 0644));
 }
 
-static void stop_term(pid_t pid)
+static void stop_term(void)
 {
-    if (pid > 0) {
-        kill(pid, SIGTERM);
-        waitpid(pid, NULL, 0);
-    }
+    unlink(RUN_DIR "/bigterm-ack");
     ioctl(0, KDSETMODE, KD_GRAPHICS);
 }
 
@@ -367,6 +365,18 @@ static void builtin_write(long v)
 {
     FILE *f = fopen(BL_PATH, "w");
     if (f) { fprintf(f, "%ld", v); fclose(f); }
+}
+
+/* The DisplayMOD app draws on the EXT display itself while it is open.
+ * The flag file holds its pid; a stale flag (app gone) is ignored. */
+static int ui_active(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    int pid = 0;
+    if (!f) return 0;
+    if (fscanf(f, "%d", &pid) != 1) pid = 0;
+    fclose(f);
+    return pid > 0 && (kill(pid, 0) == 0 || errno == EPERM);
 }
 
 /* Keyboard, read without grabbing, only to notice activity. */
@@ -434,7 +444,7 @@ static int reload_conf_if_changed(void)
     static time_t mtime;
     struct stat st;
     const char *path = getenv("DM_CONF");
-    if (stat(path ? path : "/etc/displaymod.conf", &st) == 0 && st.st_mtime != mtime) {
+    if (stat(path ? path : CONF_PATH, &st) == 0 && st.st_mtime != mtime) {
         mtime = st.st_mtime;
         load_conf();
         return 1;
@@ -464,7 +474,9 @@ int main(void)
 
     char flag[64];
     if ((e = getenv("DM_FLAG"))) snprintf(flag, sizeof flag, "%s", e);
-    else snprintf(flag, sizeof flag, "/run/user/%u/displaymod-bigterm", (unsigned)getuid());
+    else snprintf(flag, sizeof flag, "%s", RUN_DIR "/bigterm");
+    const char *ui_flag = RUN_DIR "/ui", *ui_ack = RUN_DIR "/ui-ack";
+    int paused = 0;
 
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
@@ -481,18 +493,22 @@ int main(void)
     fprintf(stderr, "displaymod-mirror: %s %dx%d -> %s %dx%d, bar %d rows\n",
             src_path, m.src.w, m.src.h, dst_path, m.dst.w, m.dst.h, m.bar_h);
 
-    pid_t term = 0;
+    int term = 0;
     int blanked = 0, last_pct = 100;
+    uint64_t blanked_at = 0;
     uint64_t last_change = now_ms(), last_sec = 0, last_info = 0, last_flag = 0;
 
     /* "Built-in off while mirroring": remember the level we turned off so it
      * can be restored, and share it with BigTermCLI's status page. */
     int kfd = open_keyboard_ro();
+    uint64_t last_kopen = now_ms();
+    if (kfd < 0) fprintf(stderr, "displaymod-mirror: keyboard not found yet, will retry\n");
+    long seen_level = 0;               /* last built-in level seen while it was on */
     long saved_level = 0, bl_max = 0;
     int forced_off = 0;
     uint64_t last_input = now_ms();
     char level_file[64];
-    snprintf(level_file, sizeof level_file, "/run/user/%u/displaymod-builtin-level", (unsigned)getuid());
+    snprintf(level_file, sizeof level_file, "%s", RUN_DIR "/builtin-level");
     if (read_int("/sys/class/backlight/backlight/max_brightness", &bl_max) != 0 || bl_max <= 0) bl_max = 100;
 
     while (!g_stop) {
@@ -501,27 +517,50 @@ int main(void)
         /* BigTermCLI hand-off, checked ~3 times a second */
         if (t - last_flag >= 300) {
             last_flag = t;
+            int want_ui = ui_active(ui_flag);
+            if (want_ui && !paused) {                  /* DisplayMOD app took the EXT display */
+                if (blanked) { ioctl(m.dst.fd, FBIOBLANK, FB_BLANK_UNBLANK); blanked = 0; }
+                paused = 1;
+                close(open(ui_ack, O_CREAT | O_WRONLY, 0644));
+            } else if (paused && !want_ui) {           /* app closed: repaint everything */
+                paused = 0;
+                unlink(ui_ack);
+                m.force = 1;
+                last_input = t;
+            }
             int want_term = g_auto_switch && access(flag, F_OK) == 0;
             if (want_term && !term) {
                 if (blanked) { ioctl(m.dst.fd, FBIOBLANK, FB_BLANK_UNBLANK); blanked = 0; }
-                term = start_term();
-            } else if (term) {
-                pid_t r = waitpid(term, NULL, WNOHANG);
-                if (!want_term) {
-                    if (r == 0) stop_term(term); else ioctl(0, KDSETMODE, KD_GRAPHICS);
-                    term = 0;
-                    m.force = 1;
-                } else if (r == term) {
-                    term = 0;   /* viewer exited; restart on next check */
-                }
-                if (!want_term) last_input = t;   /* don't fall asleep right after */
+                start_term();
+                term = 1;
+            } else if (term && !want_term) {
+                stop_term();
+                term = 0;
+                m.force = 1;
+                last_input = t;   /* don't fall asleep right after */
             }
         }
-        if (term) {
+        if (term || paused) {
             /* BigTermCLI may darken the built-in screen: keep the last level */
             if (t - last_sec >= 1000) {
                 last_sec = t;
                 reload_conf_if_changed();
+                if (paused && !term) {               /* DisplayMOD app open: "Built-in off" still applies live */
+                    long b;
+                    if (g_builtin_off) {
+                        if (read_int(BL_PATH, &b) == 0 && b > 0) {
+                            saved_level = b;
+                            FILE *lf = fopen(level_file, "w");
+                            if (lf) { fprintf(lf, "%ld", b); fclose(lf); }
+                            builtin_write(0);
+                            forced_off = 1;
+                        }
+                    } else if (forced_off) {         /* switched off in the app: light it again now */
+                        builtin_write(saved_level > 0 ? saved_level : bl_max);
+                        unlink(level_file);
+                        forced_off = 0;
+                    }
+                }
                 set_backlight(g_bright > 0 ? g_bright : last_pct);
             }
             usleep(100000);
@@ -529,10 +568,21 @@ int main(void)
         }
 
         /* Key presses (shared, not grabbed) keep the EXT display awake */
+        if (kfd < 0 && t - last_kopen >= 5000) {        /* keyboard missing: try again */
+            last_kopen = t;
+            kfd = open_keyboard_ro();
+            if (kfd >= 0) fprintf(stderr, "displaymod-mirror: keyboard found\n");
+        }
         if (kfd >= 0) {
             struct input_event ev;
-            while (read(kfd, &ev, sizeof ev) == (ssize_t)sizeof ev)
+            ssize_t r;
+            while ((r = read(kfd, &ev, sizeof ev)) == (ssize_t)sizeof ev)
                 if (ev.type == EV_KEY) last_input = t;
+            if (r < 0 && errno != EAGAIN && errno != EINTR) {   /* device went away */
+                fprintf(stderr, "displaymod-mirror: keyboard lost, will retry\n");
+                close(kfd);
+                kfd = -1;
+            }
         }
 
         /* Follow the built-in backlight (4x a second when keeping it off,
@@ -546,6 +596,7 @@ int main(void)
                 /* BigTermCLI may be starting: it sets the built-in itself (DIM_BUILTIN) */
                 if (access(flag, F_OK) != 0 && read_int(BL_PATH, &b) == 0 && b > 0) {
                     saved_level = b;
+                    last_input = t;                  /* the launcher lit it: someone pressed a key */
                     FILE *lf = fopen(level_file, "w");
                     if (lf) { fprintf(lf, "%ld", b); fclose(lf); }
                     builtin_write(0);
@@ -559,11 +610,26 @@ int main(void)
                     unlink(level_file);
                     forced_off = 0;
                 }
+                long cur;
+                if (read_int(BL_PATH, &cur) == 0 && cur > 0) seen_level = cur;
+                else if (blanked && last_input > blanked_at && seen_level > 0) {
+                    builtin_write(seen_level);       /* key while both screens are dark: wake them */
+                    fprintf(stderr, "displaymod-mirror: key pressed, waking the built-in screen\n");
+                }
                 on = builtin_backlight_on();
                 pct = builtin_percent();
             }
-            if (!on && !blanked) { ioctl(m.dst.fd, FBIOBLANK, FB_BLANK_POWERDOWN); blanked = 1; }
-            else if (on && blanked) { ioctl(m.dst.fd, FBIOBLANK, FB_BLANK_UNBLANK); blanked = 0; m.force = 1; }
+            if (!on && !blanked) {
+                ioctl(m.dst.fd, FBIOBLANK, FB_BLANK_POWERDOWN);
+                blanked = 1;
+                blanked_at = t;
+                fprintf(stderr, "displaymod-mirror: EXT display asleep\n");
+            } else if (on && blanked) {
+                ioctl(m.dst.fd, FBIOBLANK, FB_BLANK_UNBLANK);
+                blanked = 0;
+                m.force = 1;
+                fprintf(stderr, "displaymod-mirror: EXT display awake\n");
+            }
             if (on) {
                 if (pct < 10) pct = 10;               /* never fully dark while on */
                 last_pct = pct;
@@ -586,7 +652,7 @@ int main(void)
         usleep(t - last_change < 2000 ? 40000 : 200000);
     }
 
-    if (term) stop_term(term);
+    if (term) stop_term();
     if (forced_off) { builtin_write(saved_level > 0 ? saved_level : bl_max); unlink(level_file); }
     ioctl(0, KDSETMODE, KD_TEXT);
     return 0;

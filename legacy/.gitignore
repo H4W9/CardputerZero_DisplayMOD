@@ -1,0 +1,10 @@
+# build output
+src/ui/lvgl/
+src/ui/build/
+src/ui/shots/
+*.deb
+pkg/usr/bin/displaymod-ui
+pkg/usr/bin/displaymod-term
+pkg/usr/lib/displaymod/displaymod-mirror
+pkg/usr/lib/displaymod/displaymod-probe
+build/

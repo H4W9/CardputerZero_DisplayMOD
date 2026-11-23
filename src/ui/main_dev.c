@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -14,6 +15,8 @@
 #include "src/drivers/display/fb/lv_linux_fbdev.h"
 #include "backend.h"
 #include "ui.h"
+
+#define SEND "/usr/lib/displaymod/displaymod-send"
 
 static volatile int g_exit;
 static int g_error;
@@ -40,6 +43,50 @@ static void builtin_fb(char *out, size_t n)
     while (fgets(line, sizeof line, f))
         if (strcasestr(line, "st7789") && sscanf(line, "%d", &num) == 1) { snprintf(out, n, "/dev/fb%d", num); break; }
     fclose(f);
+}
+
+/* ------------------------------------------------------------ EXT display */
+static int ext_fb(char *out, size_t n)     /* the ILI9341 framebuffer, if it's up */
+{
+    FILE *f = fopen("/proc/fb", "r");
+    if (!f) return -1;
+    char line[128];
+    int num = -1;
+    while (fgets(line, sizeof line, f))
+        if (strcasestr(line, "ili9341") && sscanf(line, "%d", &num) == 1) break; else num = -1;
+    fclose(f);
+    if (num < 0) return -1;
+    snprintf(out, n, "/dev/fb%d", num);
+    return access(out, R_OK | W_OK);
+}
+
+/* Ask the DisplayMOD service to pause the mirror while we draw there. */
+static int ext_claim(void)
+{
+    char pid[16];
+    snprintf(pid, sizeof pid, "%d", (int)getpid());
+    pid_t p = fork();
+    if (p == 0) {
+        int dn = open("/dev/null", O_WRONLY);
+        if (dn >= 0) { dup2(dn, 1); dup2(dn, 2); }
+        execl(SEND, SEND, "ui", "on", pid, (char *)NULL);
+        _exit(127);
+    }
+    int st = 0;
+    if (p < 0 || waitpid(p, &st, 0) < 0) return -1;
+    return WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : -1;
+}
+
+static void ext_release(void)
+{
+    pid_t p = fork();
+    if (p == 0) {
+        int dn = open("/dev/null", O_WRONLY);
+        if (dn >= 0) { dup2(dn, 1); dup2(dn, 2); }
+        execl(SEND, SEND, "ui", "off", (char *)NULL);
+        _exit(127);
+    }
+    if (p > 0) waitpid(p, NULL, 0);
 }
 
 /* ------------------------------------------------------------ keyboard */
@@ -118,11 +165,28 @@ int main(void)
     lv_init();
     lv_tick_set_cb(tick_ms);
 
-    char fbpath[32];
+    char fbpath[32], extpath[32];
     builtin_fb(fbpath, sizeof fbpath);
+    lv_display_t *disps[2];
+    int nd = 0;
     lv_display_t *disp = lv_linux_fbdev_create();
     if (!disp) { fprintf(stderr, "display init failed\n"); return 1; }
     lv_linux_fbdev_set_file(disp, fbpath);
+    disps[nd++] = disp;
+
+    /* The app also fills the EXT display while it's open (the mirror pauses) */
+    int ext = 0;
+    if (ext_fb(extpath, sizeof extpath) == 0 && ext_claim() == 0) {
+        lv_display_t *d2 = lv_linux_fbdev_create();
+        if (d2) {
+            lv_linux_fbdev_set_file(d2, extpath);
+            disps[nd++] = d2;
+            ext = 1;
+        } else {
+            ext_release();
+        }
+    }
+    lv_display_set_default(disp);
 
     g_kfd = open_keyboard();
     if (g_kfd < 0) fprintf(stderr, "displaymod-ui: no keyboard found\n");
@@ -139,15 +203,16 @@ int main(void)
 
     if (dm_load() != 0) {
         g_error = 1;
-        ui_create_error(group, "DisplayMOD can't reach its helper.\n"
-                               "Reinstall the package, then try again.\n\nPress Esc to exit.");
+        ui_create_error(group, disps, nd, "The DisplayMOD service is not running.\n"
+                               "Restart the CardputerZero or reinstall.\n\nPress Esc to exit.");
     } else
-        ui_create(group);
+        ui_create(group, disps, nd);
 
     while (!g_exit) {
         uint32_t d = lv_timer_handler();
         if (d > 30) d = 30;
         usleep(d * 1000);
     }
+    if (ext) ext_release();
     return 0;
 }

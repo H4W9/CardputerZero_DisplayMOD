@@ -36,6 +36,8 @@ BINARIES = {
     "usr/lib/displaymod/displaymod-mirror": "src/mirror/displaymod-mirror.c",
     "usr/lib/displaymod/displaymod-probe": "src/probe/displaymod-probe.c",
     "usr/bin/displaymod-term": "src/term/displaymod-term.c",
+    "usr/lib/displaymod/displaymod-daemon": "src/daemon/displaymod-daemon.c",
+    "usr/lib/displaymod/displaymod-send": "src/daemon/displaymod-send.c",
 }
 UI_BIN = "usr/bin/displaymod-ui"
 UI_SRC = ["ui.c", "backend_ctl.c", "main_dev.c"]

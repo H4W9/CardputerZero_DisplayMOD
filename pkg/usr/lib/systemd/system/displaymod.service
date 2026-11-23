@@ -1,14 +1,22 @@
 [Unit]
 Description=DisplayMOD second screen
-After=local-fs.target systemd-modules-load.service
+# After the boot splash: switching consoles under it stalls the login on tty1
+After=local-fs.target systemd-modules-load.service plymouth-quit-wait.service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 User=displaymod
-ExecStart=/usr/bin/sudo -n /usr/lib/displaymod/displaymod-ctl boot
-ExecStop=/usr/bin/sudo -n /usr/lib/displaymod/displaymod-ctl shutdown
-TimeoutStartSec=60
+DynamicUser=yes
+SupplementaryGroups=video input tty
+AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_SYS_TTY_CONFIG CAP_CHOWN CAP_FOWNER
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_SYS_TTY_CONFIG CAP_CHOWN CAP_FOWNER
+RuntimeDirectory=displaymod
+RuntimeDirectoryMode=0755
+ConfigurationDirectory=displaymod
+ReadWritePaths=/usr/share/APPLaunch/applications
+ExecStart=/usr/lib/displaymod/displaymod-daemon
+Restart=on-failure
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target

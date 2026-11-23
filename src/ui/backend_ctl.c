@@ -1,4 +1,4 @@
-/* Device backend: runs "sudo -n /usr/lib/displaymod/displaymod-ctl ..." without a shell. */
+/* Device backend: runs "/usr/lib/displaymod/displaymod-send ..." (the DisplayMOD service) without a shell. */
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <signal.h>
@@ -10,7 +10,7 @@
 
 #include "backend.h"
 
-#define CTL "/usr/lib/displaymod/displaymod-ctl"
+#define SEND "/usr/lib/displaymod/displaymod-send"
 #define MAX_KEYS 24
 
 static dm_pair_t g_set[MAX_KEYS];
@@ -28,7 +28,7 @@ static int run_capture(const char *const argv[], char *out, size_t n)
         int dn = open("/dev/null", O_WRONLY);
         if (dn >= 0) dup2(dn, 2);
         close(p[0]); close(p[1]);
-        execv("/usr/bin/sudo", (char *const *)argv);
+        execv(SEND, (char *const *)argv);
         _exit(127);
     }
     close(p[1]);
@@ -55,7 +55,7 @@ static void put(const char *k, const char *v)
 
 int dm_load(void)
 {
-    const char *argv[] = {"sudo", "-n", CTL, "get-all", NULL};
+    const char *argv[] = {SEND, "get-all", NULL};
     char buf[1024];
     if (run_capture(argv, buf, sizeof buf) != 0) return -1;
     for (char *line = strtok(buf, "\n"); line; line = strtok(NULL, "\n")) {
@@ -83,7 +83,7 @@ static int spawn(const char *const argv[])
         int dn = open("/dev/null", O_RDWR);
         if (dn >= 0) { dup2(dn, 0); dup2(dn, 1); dup2(dn, 2); }
         setsid();
-        execv("/usr/bin/sudo", (char *const *)argv);
+        execv(SEND, (char *const *)argv);
         _exit(127);
     }
     g_job = pid;
@@ -92,7 +92,7 @@ static int spawn(const char *const argv[])
 
 int dm_set_async(const char *key, const char *val)
 {
-    const char *argv[] = {"sudo", "-n", CTL, "set", key, val, NULL};
+    const char *argv[] = {SEND, "set", key, val, NULL};
     if (spawn(argv) != 0) return -1;
     put(key, val);
     return 0;
@@ -100,9 +100,9 @@ int dm_set_async(const char *key, const char *val)
 
 int dm_set_many_async(const char *const *kv, int pairs)
 {
-    const char *argv[4 + 2 * 24 + 1] = {"sudo", "-n", CTL, "set-many"};
+    const char *argv[2 + 2 * 24 + 1] = {SEND, "set-many"};
     if (pairs > 24) pairs = 24;
-    int a = 4;
+    int a = 2;
     for (int i = 0; i < 2 * pairs; i++) argv[a++] = kv[i];
     argv[a] = NULL;
     if (spawn(argv) != 0) return -1;
@@ -112,14 +112,13 @@ int dm_set_many_async(const char *const *kv, int pairs)
 
 int dm_apply_async(void)
 {
-    const char *argv[] = {"sudo", "-n", CTL, "apply", NULL};
+    const char *argv[] = {SEND, "apply", NULL};
     return spawn(argv);
 }
 
 int dm_uninstall_async(void)
 {
-    const char *argv[] = {"sudo", "-n", CTL, "uninstall", NULL};
-    return spawn(argv);
+    return -1;   /* store edition: removing the package needs sudo apt remove */
 }
 
 int dm_poll(int *rc)
@@ -136,7 +135,7 @@ int dm_poll(int *rc)
 
 int dm_status(dm_pair_t *out, int max)
 {
-    const char *argv[] = {"sudo", "-n", CTL, "status", NULL};
+    const char *argv[] = {SEND, "status", NULL};
     char buf[1024];
     if (run_capture(argv, buf, sizeof buf) != 0) return 0;
     int n = 0;
@@ -153,7 +152,7 @@ int dm_status(dm_pair_t *out, int max)
 
 int dm_panel_state(void)
 {
-    const char *argv[] = {"sudo", "-n", CTL, "panel-state", NULL};
+    const char *argv[] = {SEND, "panel-state", NULL};
     char buf[16];
     if (run_capture(argv, buf, sizeof buf) != 0) return 0;
     if (!strncmp(buf, "up", 2)) return 1;
@@ -163,7 +162,7 @@ int dm_panel_state(void)
 
 int dm_panel_up(void)
 {
-    const char *argv[] = {"sudo", "-n", CTL, "panel-state", NULL};
+    const char *argv[] = {SEND, "panel-state", NULL};
     char buf[16];
     return run_capture(argv, buf, sizeof buf) == 0 && !strncmp(buf, "up", 2);
 }

@@ -8,7 +8,7 @@
 #define LV_USE_STDLIB_MALLOC      LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING      LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF     LV_STDLIB_BUILTIN
-#define LV_MEM_SIZE               (160U * 1024U)
+#define LV_MEM_SIZE               (256U * 1024U)   /* two views: built-in + EXT */
 #define LV_DEF_REFR_PERIOD        20
 #define LV_DPI_DEF                130
 

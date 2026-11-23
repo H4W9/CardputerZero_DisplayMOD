@@ -8,3 +8,5 @@ pkg/usr/bin/displaymod-term
 pkg/usr/lib/displaymod/displaymod-mirror
 pkg/usr/lib/displaymod/displaymod-probe
 build/
+pkg/usr/lib/displaymod/displaymod-daemon
+pkg/usr/lib/displaymod/displaymod-send

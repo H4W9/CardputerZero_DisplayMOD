@@ -1,0 +1,239 @@
+#!/bin/bash
+# displaymod - text version of the DisplayMOD settings (for SSH or a plain
+# terminal). Same settings as the DisplayMOD launcher app.
+# Press a key to choose; no Enter needed. b = back, q = quit.
+# Quick settings apply at once; settings that restart the EXT display are
+# queued (shown with *) until you press p to apply them together.
+
+CTL=(sudo -n /usr/lib/displaymod/displaymod-ctl)
+HIST="$HOME/.local/share/displaymod/bigterm_history"
+
+declare -A PEND
+LIVE=" BRIGHTNESS BORDER_COLOR BUILTIN_OFF SLEEP DIM_BUILTIN BIGTERM HISTORY HIST_SIZE HIST_DUPS "
+
+cls() { printf '\033[H\033[2J'; }
+key() { IFS= read -rsn1 k || k=q; printf '%s' "$k"; }   # end of input = quit
+get() { "${CTL[@]}" get "$1" 2>/dev/null; }
+yn()  { [ "$1" = 1 ] && echo on || echo off; }
+
+# Value as shown: the queued one if there is one ("*" marks it)
+val() { if [ -n "${PEND[$1]+x}" ]; then echo "${PEND[$1]}"; else get "$1"; fi; }
+mark() { [ -n "${PEND[$1]+x}" ] && echo "*"; }
+
+# Change a setting: quick ones now, the rest queued
+chg() {
+  if [[ "$LIVE" == *" $1 "* ]] && [ -z "${PEND[$1]+x}" ]; then
+    "${CTL[@]}" set "$1" "$2" >/dev/null 2>&1 && return
+  fi
+  if [ "$(val "$1")" = "$2" ]; then unset "PEND[$1]"; else PEND[$1]=$2; fi
+}
+
+pnote() { [ ${#PEND[@]} -gt 0 ] && echo "   [p] apply ${#PEND[@]}"; }
+
+apply_pending() {
+  [ ${#PEND[@]} -gt 0 ] || return
+  args=()
+  for k in "${!PEND[@]}"; do args+=("$k" "${PEND[$k]}"); done
+  PEND=()
+  run set-many "${args[@]}"
+}
+pause() { printf ' Press any key...'; key >/dev/null; }
+
+run() {
+  cls; echo " Applying..."
+  out=$("${CTL[@]}" "$@" 2>&1); rc=$?
+  if [ $rc -ne 0 ]; then echo "$out" | head -n 6 | sed 's/^/ /'; pause; fi
+}
+
+cycle() { # current value, list... -> next value
+  cur=$1; shift; first=$1; found=0
+  for v in "$@"; do
+    [ $found = 1 ] && { echo "$v"; return; }
+    [ "$v" = "$cur" ] && found=1
+  done
+  echo "$first"
+}
+
+screen_state() {
+  case "$("${CTL[@]}" panel-state 2>/dev/null)" in
+    up) echo "detected" ;; missing) echo "NOT detected" ;; *) echo "off" ;;
+  esac
+}
+
+menu_layout() {
+  while :; do
+    ly=$(val MIRROR_LAYOUT); al=$(val ALIGN); bc=$(val BORDER_COLOR)
+    case "$ly" in bar) lyn="1:1 + status bar" ;; stretch) lyn="Stretch" ;; *) lyn="1:1, no bar" ;; esac
+    cls
+    echo " Layout & border$(pnote)"
+    echo " [1] Layout          $lyn$(mark MIRROR_LAYOUT)"
+    if [ "$ly" = plain ]; then      # position and border only apply to "1:1, no bar"
+      echo " [2] Position        $al$(mark ALIGN)"
+      echo " [3] Border color    $bc"
+    fi
+    echo " [b] Back"
+    case $(key) in
+      1) chg MIRROR_LAYOUT "$(cycle "$ly" bar stretch plain)" ;;
+      2) [ "$ly" = plain ] && chg ALIGN "$(cycle "$al" top center bottom)" ;;
+      3) [ "$ly" = plain ] && chg BORDER_COLOR "$(cycle "$bc" black charcoal slate navy teal green maroon purple white)" ;;
+      p) apply_pending ;;
+      b|q) return ;;
+    esac
+  done
+}
+
+menu_builtin() {
+  while :; do
+    bo=$(val BUILTIN_OFF); sl=$(val SLEEP); d=$(val DIM_BUILTIN)
+    if [ "$sl" = 0 ]; then sln=never; else sln="$sl min"; fi
+    cls
+    echo " Built-in screen$(pnote)"
+    echo " [1] Off while mirroring   $(yn "$bo")"
+    echo " [2] EXT display sleeps     $sln"
+    echo "     (when built-in is off)"
+    echo " [3] Dark in BigTermCLI      $(yn "$d")"
+    echo " [b] Back"
+    case $(key) in
+      1) chg BUILTIN_OFF "$(cycle "$bo" 0 1)" ;;
+      2) chg SLEEP "$(cycle "$sl" 1 2 5 10 30 0)" ;;
+      3) chg DIM_BUILTIN "$(cycle "$d" 0 1)" ;;
+      p) apply_pending ;;
+      b|q) return ;;
+    esac
+  done
+}
+
+menu_pins() {
+  cls
+  echo " GPIO numbers (0-27), Enter = keep"
+  for p in DC RST LED; do
+    cur=$(val $p)
+    read -rp " $p [$cur]: " v
+    [ -n "$v" ] && [ "$v" != "$cur" ] && chg "$p" "$v"
+  done
+}
+
+menu_screen() {
+  while :; do
+    br=$(val BRIGHTNESS); r=$(val ROTATE); f=$(val FONT); s=$(val SPEED)
+    g=$(val BGR); dt=$(val DETECT)
+    if [ "$br" = sync ]; then brn="match built-in"; else brn="$br%"; fi
+    cls
+    echo " EXT display ($(screen_state))$(pnote)"
+    echo " [1] Brightness  $brn"
+    echo " [2] Rotation $r$(mark ROTATE)   [3] Font $f$(mark FONT)"
+    echo " [4] SPI $((s / 1000000)) MHz$(mark SPEED)   [5] Swap R/B $(yn "$g")$(mark BGR)"
+    echo " [6] Start only if detected  $(yn "$dt")$(mark DETECT)"
+    echo " [7] Pins DC/RST/LED $(val DC)/$(val RST)/$(val LED)"
+    echo " [8] Check for screen again"
+    echo " [b] Back"
+    case $(key) in
+      1) chg BRIGHTNESS "$(cycle "$br" sync 10 20 30 40 50 60 70 80 90 100)" ;;
+      2) chg ROTATE "$(cycle "$r" 90 270 0 180)" ;;
+      3) chg FONT "$(cycle "$f" 6x12 8x8 8x16)" ;;
+      4) chg SPEED "$(cycle "$s" 8000000 16000000 24000000 32000000)" ;;
+      5) chg BGR "$(cycle "$g" 0 1)" ;;
+      6) chg DETECT "$(cycle "$dt" 0 1)" ;;
+      7) menu_pins ;;
+      8) run apply ;;
+      p) apply_pending ;;
+      b|q) return ;;
+    esac
+  done
+}
+
+hist_count() {
+  if [ -s "$HIST" ]; then wc -l < "$HIST" | tr -d ' '; else echo 0; fi
+}
+
+menu_history() {
+  while :; do
+    h=$(val HISTORY); hs=$(val HIST_SIZE); hd=$(val HIST_DUPS)
+    cls
+    echo " BigTermCLI history$(pnote)"
+    echo " Saved commands: $(hist_count)"
+    echo " [1] Save command history  $(yn "$h")"
+    echo " [2] Keep last             $hs"
+    echo " [3] Skip repeated         $(yn "$hd")"
+    echo " [4] Clear history"
+    echo " [b] Back"
+    case $(key) in
+      1) chg HISTORY "$(cycle "$h" 0 1)" ;;
+      2) chg HIST_SIZE "$(cycle "$hs" 100 500 1000 5000)" ;;
+      3) chg HIST_DUPS "$(cycle "$hd" 0 1)" ;;
+      4) cls; echo " Clear all saved BigTermCLI history? [y/n]"
+         if [ "$(key)" = y ]; then
+           mkdir -p "${HIST%/*}"; : > "$HIST"; : > "$HIST.clear"   # open shell clears at next prompt
+         fi ;;
+      p) apply_pending ;;
+      b|q) return ;;
+    esac
+  done
+}
+
+show_status() {
+  cls; echo " Status"
+  "${CTL[@]}" status | awk -F'|' '{printf " %-15s%s\n", $1, $2}'
+  pause
+}
+
+show_wiring() {
+  cls
+  echo " Wiring (power off first!)"
+  echo " VCC->6 (5V)  GND->4  CS->13 (G7)"
+  echo " RESET->5 (G22)  DC->3 (G23)"
+  echo " SDI/MOSI->9 (G10)  SCK->7 (G11)"
+  echo " LED->1 (G26)  SDO/MISO->11 (G9)"
+  echo " Touch + SD pins: unconnected"
+  echo " Never use pin 2 (5V in)"
+  pause
+}
+
+show_about() {
+  v=$(dpkg-query -W -f='${Version}' displaymod 2>/dev/null)
+  cls
+  echo " DisplayMOD ${v:-?}  by H4W9"
+  echo " Second screen for the CardputerZero"
+  echo " (2.8\" ILI9341 EXT display)."
+  echo " Mirror with status bar, BigTermCLI,"
+  echo " brightness, sleep, saved history."
+  echo " Launcher app: DisplayMOD"
+  pause
+}
+
+if ! "${CTL[@]}" panel-state >/dev/null 2>&1; then
+  echo "DisplayMOD: helper not reachable. Reinstall the package."; exit 1
+fi
+
+while :; do
+  m=$(val MODE); bt=$(val BIGTERM)
+  cls
+  echo " DisplayMOD     EXT: $(screen_state)"
+  echo " [1] Mirror              $([ "$m" = mirror ] && echo on || echo off)$(mark MODE)"
+  echo " [2] BigTermCLI app    $(yn "$bt")"
+  echo " [3] Layout & border     [4] Built-in"
+  echo " [5] EXT display          [6] History"
+  echo " [s] Status  [w] Wiring  [a] About"
+  echo " [u] Uninstall           [q] Quit"
+  [ ${#PEND[@]} -gt 0 ] && echo " [p] Apply ${#PEND[@]} queued change(s)"
+  case $(key) in
+    1) chg MODE "$(cycle "$m" off mirror)" ;;
+    2) chg BIGTERM "$(cycle "$bt" 0 1)" ;;
+    3) menu_layout ;;
+    4) menu_builtin ;;
+    5) menu_screen ;;
+    6) menu_history ;;
+    s) show_status ;;
+    w) show_wiring ;;
+    a) show_about ;;
+    u) cls; echo " Remove DisplayMOD? [y/n]"
+       if [ "$(key)" = y ]; then "${CTL[@]}" uninstall 2>&1 | tail -n 3; exit 0; fi ;;
+    p) apply_pending ;;
+    q|Q)
+      if [ ${#PEND[@]} -gt 0 ]; then
+        cls; echo " Apply ${#PEND[@]} queued change(s) first? [y/n]"
+        [ "$(key)" = y ] && apply_pending
+      fi
+      cls; exit 0 ;;
+  esac
+done

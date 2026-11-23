@@ -5,7 +5,7 @@
 # Quick settings apply at once; settings that restart the EXT display are
 # queued (shown with *) until you press p to apply them together.
 
-CTL=(sudo -n /usr/lib/displaymod/displaymod-ctl)
+CTL=(/usr/lib/displaymod/displaymod-send)
 HIST="$HOME/.local/share/displaymod/bigterm_history"
 
 declare -A PEND
@@ -67,13 +67,15 @@ menu_layout() {
     cls
     echo " Layout & border$(pnote)"
     echo " [1] Layout          $lyn$(mark MIRROR_LAYOUT)"
-    echo " [2] Position        $al$(mark ALIGN)   (1:1, no bar)"
-    echo " [3] Border color    $bc"
+    if [ "$ly" = plain ]; then      # position and border only apply to "1:1, no bar"
+      echo " [2] Position        $al$(mark ALIGN)"
+      echo " [3] Border color    $bc"
+    fi
     echo " [b] Back"
     case $(key) in
       1) chg MIRROR_LAYOUT "$(cycle "$ly" bar stretch plain)" ;;
-      2) chg ALIGN "$(cycle "$al" top center bottom)" ;;
-      3) chg BORDER_COLOR "$(cycle "$bc" black charcoal slate navy teal green maroon purple white)" ;;
+      2) [ "$ly" = plain ] && chg ALIGN "$(cycle "$al" top center bottom)" ;;
+      3) [ "$ly" = plain ] && chg BORDER_COLOR "$(cycle "$bc" black charcoal slate navy teal green maroon purple white)" ;;
       p) apply_pending ;;
       b|q) return ;;
     esac
@@ -200,7 +202,7 @@ show_about() {
 }
 
 if ! "${CTL[@]}" panel-state >/dev/null 2>&1; then
-  echo "DisplayMOD: helper not reachable. Reinstall the package."; exit 1
+  echo "DisplayMOD: the service is not running (systemctl status displaymod)."; exit 1
 fi
 
 while :; do
@@ -224,8 +226,12 @@ while :; do
     s) show_status ;;
     w) show_wiring ;;
     a) show_about ;;
-    u) cls; echo " Remove DisplayMOD? [y/n]"
-       if [ "$(key)" = y ]; then "${CTL[@]}" uninstall 2>&1 | tail -n 3; exit 0; fi ;;
+    u) cls
+       echo " To remove DisplayMOD, run over"
+       echo " SSH or in the CLI app:"
+       echo "   sudo apt remove displaymod"
+       echo " Run it now? [y/n]"
+       if [ "$(key)" = y ]; then cls; sudo apt remove displaymod; exit 0; fi ;;
     p) apply_pending ;;
     q|Q)
       if [ ${#PEND[@]} -gt 0 ]; then

@@ -82,7 +82,7 @@ int main(int argc, char **argv)
     lv_indev_set_group(kp, g);
 
     dm_load();
-    ui_create(g);
+    ui_create(g, &d, 1);
     run(300);
 
     char *script = strdup(argv[2]);

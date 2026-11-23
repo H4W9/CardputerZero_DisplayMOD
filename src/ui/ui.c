@@ -1,4 +1,7 @@
-/* DisplayMOD settings app UI (LVGL v9.2, 320x170, keyboard only).
+/* DisplayMOD settings app UI (LVGL v9.2, keyboard only).
+ * Drawn on the built-in screen (320x170) and, when the EXT display is up,
+ * full size on it too. Keyboard focus lives on the built-in view; the EXT
+ * view follows it.
  *   Up/Down  move      Left/Right  change value      Enter  toggle/open
  *   Esc/Back go back (exits on the home page)      A  apply queued changes
  *
@@ -48,6 +51,25 @@ typedef struct {
 static lv_group_t *g_group;
 static lv_obj_t *g_list, *g_chip, *g_chip_lbl, *g_title, *g_busy, *g_hint;
 static int g_exit_after;
+
+/* Screens the app draws on: [0] built-in (keyboard focus), [1] EXT display */
+#define MAX_VIEWS 2
+typedef struct {
+    lv_display_t *disp;
+    lv_obj_t *list, *chip, *chip_lbl, *title, *hint, *busy;
+} view_t;
+static view_t g_v[MAX_VIEWS];
+static int g_nv, g_cur;
+
+static void use_view(int i)       /* the g_* widgets now point at this view */
+{
+    g_cur = i;
+    g_list = g_v[i].list;
+    g_chip = g_v[i].chip;
+    g_chip_lbl = g_v[i].chip_lbl;
+    g_title = g_v[i].title;
+    g_hint = g_v[i].hint;
+}
 
 /* ------------------------------------------------- queued (pending) changes */
 #define MAX_PEND 16
@@ -104,12 +126,13 @@ static const char *const BORDER_V[] = {"black", "charcoal", "slate", "navy", "te
 static const char *const BORDER_N[] = {"Black", "Charcoal", "Slate", "Navy", "Teal", "Green", "Maroon", "Purple", "White", NULL};
 static const char *const ROT_V[] = {"90", "270", "0", "180", NULL};
 static const char *const ROT_N[] = {"90\xC2\xB0 wide", "270\xC2\xB0 wide", "0\xC2\xB0 tall", "180\xC2\xB0 tall", NULL};
-static const char *const FONT_V[] = {"6x12", "8x16", "8x8", NULL};
-static const char *const FONT_N[] = {"6x12 \xE2\x80\xA2 53x20", "8x16 \xE2\x80\xA2 40x15", "8x8 \xE2\x80\xA2 40x30", NULL};
+static const char *const FONT_V[] = {"6x12", "8x8", "8x16", NULL};      /* same order as F6 in BigTermCLI */
+static const char *const FONT_N[] = {"6x12 \xE2\x80\xA2 53x20", "8x8 \xE2\x80\xA2 40x30", "8x16 \xE2\x80\xA2 40x15", NULL};
 static const char *const BRIGHT_V[] = {"sync", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100", NULL};
 static const char *const BRIGHT_N[] = {"Match built-in", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", NULL};
 static const char *const SPEED_V[] = {"8000000", "16000000", "24000000", "32000000", NULL};
 static const char *const SPEED_N[] = {"8 MHz", "16 MHz", "24 MHz", "32 MHz", NULL};
+static const char *const GPIO_V[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", NULL};
 
 enum { ACT_UNINSTALL = 1, ACT_CANCEL = 2, ACT_EXIT = 3, ACT_RECHECK = 4, ACT_CLEAR_HIST = 5,
        ACT_APPLY = 6, ACT_APPLY_EXIT = 7 };
@@ -118,7 +141,7 @@ static const item_t HOME[] = {
     {K_TOGGLE, "Mirror to EXT display", "MODE", NULL, NULL, "mirror", "off", 0},
     {K_TOGGLE, "BigTermCLI app", "BIGTERM", NULL, NULL, "1", "0", 0},
     {K_PICK, "Layout", "MIRROR_LAYOUT", LAYOUT_V, LAYOUT_N, NULL, NULL, 0},
-    {K_PICK, "Position (1:1, no bar)", "ALIGN", ALIGN_V, ALIGN_N, NULL, NULL, 0},
+    {K_PICK, "Position", "ALIGN", ALIGN_V, ALIGN_N, NULL, NULL, 0},
     {K_PICK, "Border color", "BORDER_COLOR", BORDER_V, BORDER_N, NULL, NULL, 0},
     {K_TOGGLE, "Built-in off while mirroring", "BUILTIN_OFF", NULL, NULL, "1", "0", 0},
     {K_TOGGLE, "Built-in dark in BigTermCLI", "DIM_BUILTIN", NULL, NULL, "1", "0", 0},
@@ -136,7 +159,9 @@ static const item_t SCREEN[] = {
     {K_PICK, "SPI speed", "SPEED", SPEED_V, SPEED_N, NULL, NULL, 0},
     {K_TOGGLE, "Swap red / blue", "BGR", NULL, NULL, "1", "0", 0},
     {K_TOGGLE, "Start only if detected", "DETECT", NULL, NULL, "1", "0", 0},
-    {K_INFO, "Pins DC / RST / LED", NULL, NULL, NULL, NULL, NULL, 0},
+    {K_PICK, "DC pin (GPIO)", "DC", GPIO_V, GPIO_V, NULL, NULL, 0},
+    {K_PICK, "Reset pin (GPIO)", "RST", GPIO_V, GPIO_V, NULL, NULL, 0},
+    {K_PICK, "LED pin (GPIO)", "LED", GPIO_V, GPIO_V, NULL, NULL, 0},
 };
 static const item_t HISTORY[] = {
     {K_TOGGLE, "Save command history", "HISTORY", NULL, NULL, "1", "0", 0},
@@ -145,10 +170,10 @@ static const item_t HISTORY[] = {
     {K_BUTTON, "Clear history", NULL, NULL, NULL, NULL, NULL, ACT_CLEAR_HIST},
 };
 static const item_t CONFIRM[] = {
-    {K_INFO, "Remove DisplayMOD and", NULL, NULL, NULL, NULL, NULL, 0},
-    {K_INFO, "turn the EXT display off?", NULL, NULL, NULL, NULL, NULL, 0},
-    {K_BUTTON, "Yes, uninstall", NULL, NULL, NULL, NULL, NULL, ACT_UNINSTALL},
-    {K_BUTTON, "Cancel", NULL, NULL, NULL, NULL, NULL, ACT_CANCEL},
+    {K_INFO, "To remove DisplayMOD, run over", NULL, NULL, NULL, NULL, NULL, 0},
+    {K_INFO, "SSH or in the CLI app:", NULL, NULL, NULL, NULL, NULL, 0},
+    {K_INFO, "sudo apt remove displaymod", NULL, NULL, NULL, NULL, NULL, 0},
+    {K_BUTTON, "Back", NULL, NULL, NULL, NULL, NULL, ACT_CANCEL},
 };
 
 /* Wiring help: display pin -> header pin (CardputerZero signal) */
@@ -179,11 +204,13 @@ static const char *const ABOUT[] = {
     "-Status bar: clock, battery, IP, RAM, CPU",
     "-Layouts: status bar, stretch, no bar",
     "-No-bar position and border color",
+    "-This app fills the EXT display while open",
     "",
     "#BigTermCLI",
     "-Full terminal on the EXT display",
     "-Same keys and colors as the CLI app",
     "-Command history kept across reboots",
+    "-Starts in your home folder",
     "",
     "#Power",
     "-Brightness follows the built-in screen",
@@ -239,9 +266,8 @@ static int pick_count(const item_t *it)
     return n;
 }
 
-static void update_chip(void)
+static void update_chip(int st)
 {
-    int st = dm_panel_state();
     const char *txt = LV_SYMBOL_OK " EXT DISPLAY";
     uint32_t bg = C_OK_BG, fg = C_OK_FG;
     if (st < 0) { txt = LV_SYMBOL_CLOSE " NO EXT DISPLAY"; bg = C_WARN_BG; fg = C_WARN_FG; }
@@ -259,7 +285,11 @@ static void poll_cb(lv_timer_t *t)
     if (!dm_poll(&rc)) return;
     lv_timer_delete(g_poll);
     g_poll = NULL;
-    if (g_busy) { lv_obj_delete(g_busy); g_busy = NULL; }
+    if (g_busy) {
+        for (int i = 0; i < g_nv; i++)
+            if (g_v[i].busy) { lv_obj_delete(g_v[i].busy); g_v[i].busy = NULL; }
+        g_busy = NULL;
+    }
     if (g_after_uninstall) { g_page = P_DONE; g_after_uninstall = 0; }
     if (g_exit_after) { ui_request_exit(); return; }
     flush_live();
@@ -268,18 +298,22 @@ static void poll_cb(lv_timer_t *t)
 
 static void show_busy(const char *msg)
 {
-    g_busy = lv_obj_create(lv_layer_top());
-    style_box(g_busy, 0x000000, 0);
-    lv_obj_set_style_bg_opa(g_busy, LV_OPA_70, 0);
-    lv_obj_set_size(g_busy, LV_PCT(100), LV_PCT(100));
-    lv_obj_t *sp = lv_spinner_create(g_busy);
-    lv_obj_set_size(sp, 34, 34);
-    lv_obj_set_style_arc_width(sp, 4, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(sp, 4, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(sp, lv_color_hex(C_ACC), LV_PART_INDICATOR);
-    lv_obj_align(sp, LV_ALIGN_CENTER, 0, -12);
-    lv_obj_t *l = text(g_busy, msg, &lv_font_montserrat_12, C_FG);
-    lv_obj_align(l, LV_ALIGN_CENTER, 0, 24);
+    for (int i = 0; i < g_nv; i++) {
+        lv_obj_t *b = lv_obj_create(lv_display_get_layer_top(g_v[i].disp));
+        style_box(b, 0x000000, 0);
+        lv_obj_set_style_bg_opa(b, LV_OPA_70, 0);
+        lv_obj_set_size(b, LV_PCT(100), LV_PCT(100));
+        lv_obj_t *sp = lv_spinner_create(b);
+        lv_obj_set_size(sp, 34, 34);
+        lv_obj_set_style_arc_width(sp, 4, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(sp, 4, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(sp, lv_color_hex(C_ACC), LV_PART_INDICATOR);
+        lv_obj_align(sp, LV_ALIGN_CENTER, 0, -12);
+        lv_obj_t *l = text(b, msg, &lv_font_montserrat_12, C_FG);
+        lv_obj_align(l, LV_ALIGN_CENTER, 0, 24);
+        g_v[i].busy = b;
+    }
+    g_busy = g_v[0].busy;
     g_poll = lv_timer_create(poll_cb, 150, NULL);
 }
 
@@ -334,11 +368,31 @@ static void apply_pending(int then_exit)
 }
 
 /* ------------------------------------------------------------- events */
+/* The EXT view has no keyboard focus of its own: highlight the same row */
+static void mirror_focus(int idx)
+{
+    for (int v = 1; v < g_nv; v++) {
+        lv_obj_t *list = g_v[v].list;
+        uint32_t n = lv_obj_get_child_count(list);
+        for (uint32_t i = 0; i < n; i++) {
+            lv_obj_t *c = lv_obj_get_child(list, i);
+            if (!lv_obj_has_flag(c, LV_OBJ_FLAG_USER_1)) continue;
+            if ((int)(intptr_t)lv_obj_get_user_data(c) == idx) {
+                lv_obj_add_state(c, LV_STATE_FOCUSED);
+                lv_obj_scroll_to_view(c, LV_ANIM_ON);
+            } else {
+                lv_obj_remove_state(c, LV_STATE_FOCUSED);
+            }
+        }
+    }
+}
+
 static void row_focused(lv_event_t *e)
 {
     lv_obj_t *row = lv_event_get_target(e);
     lv_obj_scroll_to_view(row, LV_ANIM_ON);
     g_focus_idx = (int)(intptr_t)lv_obj_get_user_data(row);
+    mirror_focus(g_focus_idx);
 }
 
 static void go(enum page p)
@@ -445,11 +499,6 @@ static lv_obj_t *make_row(const item_t *it, int idx, int focusable)
     } else if (it->kind == K_LINK) {
         lv_obj_t *v = text(row, LV_SYMBOL_RIGHT, &lv_font_montserrat_12, C_DIM);
         lv_obj_align(v, LV_ALIGN_RIGHT_MID, 0, 0);
-    } else if (it->kind == K_INFO && it->key == NULL && g_page == P_SCREEN) {
-        char buf[48];
-        snprintf(buf, sizeof buf, "%s / %s / %s", dm_get("DC"), dm_get("RST"), dm_get("LED"));
-        lv_obj_t *v = text(row, buf, &lv_font_montserrat_12, C_DIM);
-        lv_obj_align(v, LV_ALIGN_RIGHT_MID, 0, 0);
     } else if (it->kind == K_BUTTON) {
         lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
         if (it->target == ACT_UNINSTALL) {
@@ -463,18 +512,18 @@ static lv_obj_t *make_row(const item_t *it, int idx, int focusable)
         lv_obj_set_height(row, 18);
     }
 
-    if (focusable) {
+    if (focusable && g_cur == 0) {
         lv_group_add_obj(g_group, row);
         lv_obj_add_event_cb(row, row_key, LV_EVENT_KEY, (void *)it);
         lv_obj_add_event_cb(row, row_focused, LV_EVENT_FOCUSED, NULL);
+    } else if (focusable) {
+        lv_obj_add_flag(row, LV_OBJ_FLAG_USER_1);    /* follows the built-in view's focus */
     }
     return row;
 }
 
-static void status_rows(void)
+static void status_rows(const dm_pair_t *st, int n)
 {
-    dm_pair_t st[DM_MAX_STATUS];
-    int n = dm_status(st, DM_MAX_STATUS);
     for (int i = 0; i < n; i++) {
         lv_obj_t *row = lv_obj_create(g_list);
         lv_obj_remove_style_all(row);
@@ -530,13 +579,21 @@ static void wiring_rows(void)
     }
 }
 
-/* ---------------------------------------------------------------- page */
-static void build_page(void)
+/* Position and border color only mean something in the "1:1, no bar" layout */
+static int shown(const item_t *it)
 {
-    lv_group_remove_all_objs(g_group);
+    if (it->key && (!strcmp(it->key, "ALIGN") || !strcmp(it->key, "BORDER_COLOR")))
+        return !strcmp(val("MIRROR_LAYOUT"), "plain");
+    return 1;
+}
+
+/* ---------------------------------------------------------------- page */
+/* Build one view of the page (g_* point at it). */
+static void build_view(enum page pg, int chip, const dm_pair_t *st, int stn)
+{
     lv_obj_clean(g_list);
     lv_obj_scroll_to_y(g_list, 0, LV_ANIM_OFF);
-    update_chip();
+    update_chip(chip);
 
     const item_t *items = NULL;
     int n = 0, fi = 0;
@@ -544,7 +601,7 @@ static void build_page(void)
                                      " change   A apply   ESC back"
                                    : LV_SYMBOL_UP LV_SYMBOL_DOWN " move   " LV_SYMBOL_LEFT LV_SYMBOL_RIGHT
                                      " change   ENTER select   ESC back");
-    if (g_np && (g_page == P_HOME || g_page == P_SCREEN)) {
+    if (g_np && (pg == P_HOME || pg == P_SCREEN)) {
         static char lbl[32];
         snprintf(lbl, sizeof lbl, "Apply changes (%d)", g_np);
         static item_t ap = {K_BUTTON, "", NULL, NULL, NULL, NULL, NULL, ACT_APPLY};
@@ -554,11 +611,11 @@ static void build_page(void)
         lv_obj_set_style_bg_color(r, lv_color_hex(0x8A6A20), LV_STATE_FOCUSED);
         lv_obj_set_style_text_color(lv_obj_get_child(r, 0), lv_color_hex(C_WARN_FG), 0);
     }
-    switch (g_page) {
+    switch (pg) {
     case P_HOME:    lv_label_set_text(g_title, "DisplayMOD"); items = HOME; n = 12; break;
-    case P_SCREEN:  lv_label_set_text(g_title, "EXT display"); items = SCREEN; n = 8; break;
+    case P_SCREEN:  lv_label_set_text(g_title, "EXT display"); items = SCREEN; n = 10; break;
     case P_CONFIRM: lv_label_set_text(g_title, "Uninstall"); items = CONFIRM; n = 4; break;
-    case P_STATUS:  lv_label_set_text(g_title, "Status"); status_rows(); break;
+    case P_STATUS:  lv_label_set_text(g_title, "Status"); status_rows(st, stn); break;
     case P_WIRING:  lv_label_set_text(g_title, "Wiring help"); wiring_rows(); break;
     case P_ABOUT:   lv_label_set_text(g_title, "About"); about_rows(); break;
     case P_LEAVE: {
@@ -589,35 +646,48 @@ static void build_page(void)
         static const item_t b = {K_INFO, "Press Esc to return to the launcher.", NULL, NULL, NULL, NULL, NULL, 0};
         static const item_t x = {K_BUTTON, "Exit", NULL, NULL, NULL, NULL, NULL, ACT_EXIT};
         make_row(&a, 0, 0); make_row(&b, 1, 0); make_row(&x, 2, 1);
-        g_page = P_HOME; /* Esc now exits */
         break;
     }
     }
     for (int i = 0; i < n; i++) {
+        if (!shown(&items[i])) continue;
         int focusable = items[i].kind != K_INFO || g_page == P_SCREEN;
         make_row(&items[i], fi, focusable);
         if (focusable) fi++;
     }
+    if (pg == P_STATUS) lv_obj_scroll_to_y(g_list, 0, LV_ANIM_OFF);   /* show info first */
+}
+
+static void build_page(void)
+{
+    enum page pg = g_page;
+    int chip = dm_panel_state();
+    dm_pair_t st[DM_MAX_STATUS];
+    int stn = pg == P_STATUS ? dm_status(st, DM_MAX_STATUS) : 0;
+    lv_group_remove_all_objs(g_group);
+    for (int v = g_nv - 1; v >= 0; v--) {          /* built-in view last: g_* end up on it */
+        use_view(v);
+        build_view(pg, chip, st, stn);
+    }
+    if (pg == P_DONE) g_page = P_HOME;            /* Esc now exits */
     /* restore focus */
     uint32_t cnt = lv_group_get_obj_count(g_group);
     if (cnt) {
         if (g_focus_idx >= (int)cnt) g_focus_idx = cnt - 1;
         lv_group_focus_obj(lv_group_get_obj_by_index(g_group, g_focus_idx));
     }
-    if (g_page == P_STATUS) lv_obj_scroll_to_y(g_list, 0, LV_ANIM_OFF);   /* show info first */
 }
 
-void ui_create(lv_group_t *group)
+static void create_view(int i, lv_display_t *disp)
 {
-    g_group = group;
-    lv_group_set_wrap(group, true);
-
-    lv_obj_t *scr = lv_screen_active();
+    int w = lv_display_get_horizontal_resolution(disp), h = lv_display_get_vertical_resolution(disp);
+    g_v[i].disp = disp;
+    lv_obj_t *scr = lv_display_get_screen_active(disp);
     style_box(scr, C_BG, 0);
 
     lv_obj_t *hdr = lv_obj_create(scr);
     style_box(hdr, C_PANEL, 0);
-    lv_obj_set_size(hdr, 320, 22);
+    lv_obj_set_size(hdr, w, 22);
     lv_obj_align(hdr, LV_ALIGN_TOP_LEFT, 0, 0);
     g_title = text(hdr, "DisplayMOD", &lv_font_montserrat_14, C_FG);
     lv_obj_align(g_title, LV_ALIGN_LEFT_MID, 8, 0);
@@ -631,7 +701,7 @@ void ui_create(lv_group_t *group)
 
     g_list = lv_obj_create(scr);
     lv_obj_remove_style_all(g_list);
-    lv_obj_set_size(g_list, 320, 170 - 22 - 14);
+    lv_obj_set_size(g_list, w, h - 22 - 14);
     lv_obj_align(g_list, LV_ALIGN_TOP_LEFT, 0, 22);
     lv_obj_set_flex_flow(g_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(g_list, 4, 0);
@@ -640,22 +710,36 @@ void ui_create(lv_group_t *group)
 
     lv_obj_t *ftr = lv_obj_create(scr);
     style_box(ftr, C_PANEL, 0);
-    lv_obj_set_size(ftr, 320, 14);
+    lv_obj_set_size(ftr, w, 14);
     lv_obj_align(ftr, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     g_hint = text(ftr, "", &lv_font_montserrat_10, C_DIM);
     lv_obj_align(g_hint, LV_ALIGN_LEFT_MID, 6, 0);
 
+    g_v[i].list = g_list; g_v[i].chip = g_chip; g_v[i].chip_lbl = g_chip_lbl;
+    g_v[i].title = g_title; g_v[i].hint = g_hint;
+}
+
+void ui_create(lv_group_t *group, lv_display_t *const *disps, int n)
+{
+    g_group = group;
+    lv_group_set_wrap(group, true);
+    if (n > MAX_VIEWS) n = MAX_VIEWS;
+    g_nv = n;
+    for (int i = n - 1; i >= 0; i--) create_view(i, disps[i]);
+    use_view(0);
     build_page();
 }
 
-/* Page used when the helper can't be reached (sudo rule missing). */
-void ui_create_error(lv_group_t *group, const char *msg)
+/* Page used when the DisplayMOD service can't be reached. */
+void ui_create_error(lv_group_t *group, lv_display_t *const *disps, int n, const char *msg)
 {
     (void)group;
-    lv_obj_t *scr = lv_screen_active();
-    style_box(scr, C_BG, 0);
-    lv_obj_t *l = text(scr, msg, &lv_font_montserrat_12, C_FG);
-    lv_obj_set_width(l, 300);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-    lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+    for (int i = 0; i < n; i++) {
+        lv_obj_t *scr = lv_display_get_screen_active(disps[i]);
+        style_box(scr, C_BG, 0);
+        lv_obj_t *l = text(scr, msg, &lv_font_montserrat_12, C_FG);
+        lv_obj_set_width(l, lv_display_get_horizontal_resolution(disps[i]) - 20);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+    }
 }

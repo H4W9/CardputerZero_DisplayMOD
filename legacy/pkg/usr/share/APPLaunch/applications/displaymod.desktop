@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=DisplayMOD
+Exec=/usr/bin/displaymod-ui
+Terminal=false
+Icon=share/images/displaymod_100.png
+Type=Application

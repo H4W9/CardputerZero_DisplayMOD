@@ -13,8 +13,10 @@
  * The CLI's viewport mode (F6) becomes "cycle text size" here, since the
  * EXT display already shows a full terminal.
  *
- * The EXT display itself is drawn by displaymod-mirror, which switches to a
- * read-only view of the session while /run/user/UID/displaymod-bigterm exists.
+ * Store edition: "displaymod-send bigterm on" asks the DisplayMOD service for
+ * the EXT display's console (the mirror switches it to text mode and the
+ * console is handed to this user). We then run view.sh there ourselves: a
+ * read-only view of the session. "bigterm off" gives the console back.
  */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -38,7 +40,9 @@
 
 #include "../common/dmdraw.h"
 
-#define CTL       "/usr/lib/displaymod/displaymod-ctl"
+#define SEND      "/usr/lib/displaymod/displaymod-send"
+#define VIEW_SH   "/usr/lib/displaymod/view.sh"
+#define CONF_PATH "/etc/displaymod/displaymod.conf"
 #define HELP_FILE "/usr/lib/displaymod/bigterm-help.txt"
 #define KEYMAP    "/usr/share/keymaps/tca8418_keypad_m5stack_keymap.map"
 #ifndef KEY_FN
@@ -60,7 +64,7 @@ static uint64_t now_ms(void)
 static void conf_get(const char *key, char *out, size_t n, const char *def)
 {
     snprintf(out, n, "%s", def);
-    FILE *f = fopen("/etc/displaymod.conf", "r");
+    FILE *f = fopen(CONF_PATH, "r");
     if (!f) return;
     char line[128];
     size_t kl = strlen(key);
@@ -111,8 +115,65 @@ static void tmux_cmd(const char *a, const char *b, const char *c, const char *d)
 
 static void builtin_light(int on)
 {
-    char *argv[] = {"sudo", "-n", CTL, "builtin", on ? "on" : "off", NULL};
+    char *argv[] = {SEND, "builtin", on ? "on" : "off", NULL};
     spawn(argv, 1);
+}
+
+/* Ask the service for the EXT console. Returns its tty number, or 0. */
+static int bigterm_on(void)
+{
+    char pidbuf[16];
+    snprintf(pidbuf, sizeof pidbuf, "%d", (int)getpid());
+    int p[2];
+    if (pipe(p) != 0) return 0;
+    pid_t pid = fork();
+    if (pid == 0) {
+        dup2(p[1], 1);
+        close(p[0]); close(p[1]);
+        execl(SEND, SEND, "bigterm", "on", pidbuf, (char *)NULL);
+        _exit(127);
+    }
+    close(p[1]);
+    char out[64] = "";
+    ssize_t r = read(p[0], out, sizeof out - 1);
+    if (r > 0) out[r] = 0;
+    close(p[0]);
+    int st = 0;
+    waitpid(pid, &st, 0);
+    if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) return 0;
+    return atoi(out);
+}
+
+static void bigterm_off(void)
+{
+    char *argv[] = {SEND, "bigterm", "off", NULL};
+    spawn(argv, 1);
+}
+
+/* view.sh on the EXT console, as this user, with that console as its terminal */
+static pid_t start_viewer(int tty)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        char dev[32];
+        snprintf(dev, sizeof dev, "/dev/tty%d", tty);
+        setsid();
+        int fd = open(dev, O_RDWR);
+        if (fd < 0) _exit(1);
+        ioctl(fd, TIOCSCTTY, 0);
+        dup2(fd, 0); dup2(fd, 1); dup2(fd, 2);
+        if (fd > 2) close(fd);
+        setenv("TERM", "linux", 1);
+        execl("/bin/sh", "sh", VIEW_SH, (char *)NULL);
+        _exit(127);
+    }
+    return pid;
+}
+
+static void stop_viewer(pid_t *v)
+{
+    if (*v > 0) { kill(*v, SIGTERM); waitpid(*v, NULL, 0); }
+    *v = 0;
 }
 
 /* ------------------------------------------------------------ keyboard */
@@ -352,9 +413,22 @@ int main(void)
     fcntl(pty, F_SETFL, O_NONBLOCK);
 
     /* Hand the EXT display to the session */
-    char flag[64];
-    snprintf(flag, sizeof flag, "/run/user/%u/displaymod-bigterm", (unsigned)getuid());
-    close(open(flag, O_CREAT | O_WRONLY, 0644));
+    int ext_tty = bigterm_on();
+    if (!ext_tty) {
+        if (have_fb0) {
+            for (int i = 0; i < fb0.w * fb0.h; i++) cur[i] = rgb(0x0D, 0x11, 0x17);
+            draw_small(&cv, 10, 60, "The EXT display is not running.", rgb(0xF0, 0xF6, 0xFC));
+            draw_small(&cv, 10, 80, "Open DisplayMOD to check it.", rgb(0x6E, 0x76, 0x81));
+            for (int y = 0; y < fb0.h; y++) put_row(&fb0, y, cur + y * fb0.w);
+        }
+        ioctl(kfd, EVIOCGRAB, 0);
+        kill(child, SIGTERM);
+        waitpid(child, NULL, 0);
+        sleep(3);
+        return 1;
+    }
+    pid_t viewer = start_viewer(ext_tty);
+    uint64_t viewer_at = now_ms();
 
     /* "Built-in off while mirroring" does not apply here: the built-in
      * follows DIM_BUILTIN only. The mirror stops forcing it off once the
@@ -368,7 +442,7 @@ int main(void)
         else { FILE *b = fopen("/sys/class/backlight/backlight/brightness", "w"); if (b) { fputs("0", b); fclose(b); } }
     } else if (!lightctl) {
         char lf[64];
-        snprintf(lf, sizeof lf, "/run/user/%u/displaymod-builtin-level", (unsigned)getuid());
+        snprintf(lf, sizeof lf, "%s", "/run/displaymod/builtin-level");
         FILE *f = fopen(lf, "r");
         if (f) { if (fscanf(f, "%ld", &lvl) != 1) lvl = 0; fclose(f); }
         if (lvl <= 0) read_int("/sys/class/backlight/backlight/max_brightness", &lvl);
@@ -403,8 +477,14 @@ int main(void)
         if (r == 0 || (r < 0 && errno == EIO)) break;
         int st;
         pid_t w;
-        while ((w = waitpid(-1, &st, WNOHANG)) > 0)
+        while ((w = waitpid(-1, &st, WNOHANG)) > 0) {
             if (w == child) g_stop = 1;
+            else if (w == viewer) viewer = 0;
+        }
+        if (!viewer && !g_stop && t - viewer_at >= 1000) {   /* viewer ended: show the session again */
+            viewer = start_viewer(ext_tty);
+            viewer_at = t;
+        }
 
         struct input_event ev;
         while (read(kfd, &ev, sizeof ev) == (ssize_t)sizeof ev) {
@@ -452,8 +532,11 @@ int main(void)
                 char cur[8];
                 conf_get("FONT", cur, sizeof cur, "6x12");
                 const char *next = !strcmp(cur, "6x12") ? "8x8" : !strcmp(cur, "8x8") ? "8x16" : "6x12";
-                char *argv[] = {"sudo", "-n", CTL, "set", "FONT", (char *)next, NULL};
+                char *argv[] = {SEND, "set", "FONT", (char *)next, NULL};
                 spawn(argv, 1);
+                stop_viewer(&viewer);              /* restart it at the new console size */
+                viewer = start_viewer(ext_tty);
+                viewer_at = t;
                 continue;
             }
 
@@ -528,9 +611,10 @@ int main(void)
 
     /* Leave: close help, detach (session keeps running), give screens back */
     if (help) { char *argv[] = {"tmux", "display-popup", "-C", "-c", viewer_tty, NULL}; spawn(argv, 1); }
+    stop_viewer(&viewer);
     kill(child, SIGTERM);
     waitpid(child, NULL, 0);
-    unlink(flag);
+    bigterm_off();
     if (dimmed && lightctl) builtin_light(1);
     ioctl(kfd, EVIOCGRAB, 0);
     return 0;

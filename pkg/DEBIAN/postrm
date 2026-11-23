@@ -1,13 +1,4 @@
 #!/bin/sh
 set -e
-if [ "$1" = remove ] || [ "$1" = purge ]; then
-  rm -f /etc/sudoers.d/displaymod /run/systemd/system/displaymod-view.service
-  rm -f /usr/share/APPLaunch/applications/displaymod-bigterm.desktop
-  rm -rf /run/displaymod
-  systemctl daemon-reload 2>/dev/null || true
-fi
-if [ "$1" = purge ]; then
-  rm -f /etc/displaymod.conf
-  userdel displaymod 2>/dev/null || true
-fi
+systemctl daemon-reload 2>/dev/null || true
 exit 0

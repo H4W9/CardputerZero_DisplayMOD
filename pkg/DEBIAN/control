@@ -1,14 +1,15 @@
 Package: displaymod
-Version: 2.7.2
+Version: 3.1.3
 Section: APPLaunch
 Priority: optional
 Architecture: arm64
-Depends: tmux, fbset, kbd, sudo
+Depends: tmux, fbset, kbd, device-tree-compiler
 Maintainer: H4W9 <H4W9@users.noreply.github.com>
 Description: Second screen for the M5Stack CardputerZero
  DisplayMOD adds a 2.8" ILI9341 SPI display (EXT display) on the EXT header.
  It mirrors the built-in screen 1:1 with a status bar in the spare rows, and
  includes BigTermCLI, a full-size terminal that runs on the EXT display.
  Settings are in the DisplayMOD launcher app or the displaymod command.
- A small root helper (displaymod-ctl) loads the display driver; the apps
- reach it through a sudo rule limited to that helper.
+ A service (displaymod.service) loads the display driver. It runs as a
+ systemd dynamic user with a few added capabilities, not as root, and the
+ apps send it settings over a local socket.

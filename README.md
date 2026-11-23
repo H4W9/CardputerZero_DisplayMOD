@@ -8,12 +8,12 @@ Second screen for the M5Stack CardputerZero. DisplayMOD drives a 2.8" ILI9341 SP
 
 - 1:1 mirror of the built-in screen, with a status bar (clock, battery, IP, RAM, CPU) in the spare rows
 - Layouts: status bar, stretch, or no bar with top/center/bottom position and a border color
-- BigTermCLI: terminal on the EXT display with the same keys and colors as the CLI app
+- BigTermCLI: terminal on the EXT display with the same keys and colors as the CLI app, starting in your home folder
 - Command history in BigTermCLI, saved after every command and kept across reboots
 - Brightness follows the built-in screen, or set it yourself (10–100%)
 - Option to keep the built-in screen off while mirroring, with an idle sleep timer (BigTermCLI has its own setting for the built-in screen)
 - EXT display detection at boot; if nothing is connected, the 5V output and driver stay off
-- Settings in the DisplayMOD launcher app, or with the `displaymod` command over SSH
+- Settings in the DisplayMOD launcher app, or with the `displaymod` command over SSH. While the app is open it also fills the whole EXT display
 
 ## Hardware
 
@@ -38,11 +38,21 @@ Leave the touch (T_*) and SD pins unconnected and don't use pin 2 (5V in). Power
 Copy the `.deb` to the CardputerZero, then:
 
 ```
-sudo apt install ./displaymod_2.7.2_arm64.deb
+sudo apt install ./displaymod_3.1.3_arm64.deb
 sudo reboot
 ```
 
 DisplayMOD and BigTermCLI appear in the launcher.
+
+### Upgrading from 2.x
+
+3.0 doesn't use a sudo rule any more. The 2.x rule stays behind after the upgrade (the store doesn't allow package scripts to remove it), so delete it once:
+
+```
+sudo rm /etc/sudoers.d/displaymod
+```
+
+Your 2.x settings are copied to `/etc/displaymod/displaymod.conf` on first start. The old `/etc/displaymod.conf` can be deleted afterwards.
 
 ## Use
 
@@ -67,9 +77,13 @@ Quick settings (brightness, border color, sleep, built-in screen, history) apply
 
 `exit` ends the session; ctrl+B then D leaves it running for next time.
 
+## Original edition
+
+`legacy/` holds the original DisplayMOD (2.x). It uses a sudo rule and a root helper instead of the service described below. That design works, but the app store doesn't accept it. It has the same features and settings, built the same way (`python legacy/tools/build_win.py`). Use one edition or the other, not both.
+
 ## Remove
 
-From the app: Status & uninstall → Uninstall. Or:
+Over SSH or in the CLI app (the DisplayMOD app shows the same command under Status & uninstall):
 
 ```
 sudo apt remove displaymod
@@ -96,7 +110,9 @@ The .deb goes into `dist/`. `tools\deploy.cmd IP` copies it to the CardputerZero
 
 ## How it works
 
-- `displaymod-ctl` (root, in `/usr/lib/displaymod`) loads the kernel `fbtft` driver for the display, the `pwm-gpio` overlay for brightness, and starts the mirror. The apps reach it through a sudo rule that only allows this helper.
+- `displaymod.service` runs `displaymod-daemon` as a systemd dynamic user (`displaymod`) with a few added capabilities, not as root. The apps talk to it with `displaymod-send` over `/run/displaymod/ctl.sock`.
+- `displaymod-ctl` (run by the daemon) loads the `fbtft` display driver and the `pwm-gpio` brightness overlay (with `dtmerge` and configfs), and moves the EXT display's console (tty8) onto the panel.
+- The daemon starts `displaymod-mirror` on that console. BigTermCLI borrows the console while it's open.
 - `displaymod-mirror` copies changed rows from the built-in framebuffer to the EXT display and draws the status bar.
 - `displaymod-term` (BigTermCLI) sends keys to a tmux session that the EXT display shows.
 - `displaymod-ui` is the settings app (LVGL).

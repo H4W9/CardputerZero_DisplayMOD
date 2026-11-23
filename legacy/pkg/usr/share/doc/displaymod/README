@@ -1,0 +1,33 @@
+DisplayMOD for the M5Stack CardputerZero
+=========================================
+
+Adds a 2.8" ILI9341 SPI display (the EXT display) to the EXT header.
+
+Wiring (power off first)
+  VCC  -> pin 6  (5V out)       GND  -> pin 4
+  CS   -> pin 13 (G7)           RESET-> pin 5  (G22)
+  DC   -> pin 3  (G23)          SDI  -> pin 9  (G10)
+  SCK  -> pin 7  (G11)          LED  -> pin 1  (G26)
+  SDO  -> pin 11 (G9), used to detect the display at boot
+  Leave the touch and SD pins unconnected. Never use pin 2 (5V in).
+
+Apps
+  DisplayMOD   settings: mirroring, layout, brightness, built-in screen,
+               BigTermCLI history, EXT display setup and pins, status,
+               wiring. While open it also fills the EXT display.
+  BigTermCLI   terminal on the EXT display (when enabled). Same keys as
+               the CLI app; starts in your home folder; fn+H help, hold
+               Esc to quit. History is saved after every command and kept
+               across reboots.
+
+Settings
+  Quick settings (brightness, border color, sleep, built-in screen, history)
+  apply at once. Settings that restart the EXT display are queued and shown
+  in amber; press A in the app (p in the displaymod command) to apply them
+  together.
+
+Terminal
+  displaymod                 same settings as the app (e.g. over SSH)
+  sudo apt remove displaymod remove it
+
+License: MIT (see copyright).

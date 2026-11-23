@@ -2,8 +2,10 @@
 set -e
 if [ "$1" = remove ] || [ "$1" = upgrade ]; then
   systemctl stop displaymod.service 2>/dev/null || true
-  /usr/lib/displaymod/displaymod-ctl shutdown 2>/dev/null || true
 fi
+# A hidden BigTermCLI entry is renamed back so dpkg removes or updates it
+B=/usr/share/APPLaunch/applications/displaymod-bigterm.desktop
+if [ -f "$B.hidden" ]; then mv -f "$B.hidden" "$B"; fi
 if [ "$1" = remove ]; then
   systemctl disable displaymod.service 2>/dev/null || true
 fi

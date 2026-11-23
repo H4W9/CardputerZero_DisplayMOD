@@ -12,6 +12,8 @@ mkdir -p pkg/usr/bin pkg/usr/lib/displaymod
 $CC -o pkg/usr/lib/displaymod/displaymod-mirror src/mirror/displaymod-mirror.c
 $CC -o pkg/usr/lib/displaymod/displaymod-probe  src/probe/displaymod-probe.c
 $CC -o pkg/usr/bin/displaymod-term              src/term/displaymod-term.c
+$CC -o pkg/usr/lib/displaymod/displaymod-daemon src/daemon/displaymod-daemon.c
+$CC -o pkg/usr/lib/displaymod/displaymod-send   src/daemon/displaymod-send.c
 make -C src/ui -j"$(nproc)"
 install -m 0755 src/ui/build/arm64/displaymod-ui pkg/usr/bin/displaymod-ui
 

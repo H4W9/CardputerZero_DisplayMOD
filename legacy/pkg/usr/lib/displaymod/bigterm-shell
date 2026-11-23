@@ -1,0 +1,5 @@
+#!/bin/sh
+# Shell for the BigTermCLI session: bash with DisplayMOD's history settings.
+# Starts in the home folder, like the launcher's CLI app.
+cd "${HOME:-/}" 2>/dev/null || cd /
+exec bash --rcfile /usr/lib/displaymod/bigterm.bashrc -i

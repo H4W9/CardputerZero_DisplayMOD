@@ -4,16 +4,16 @@ Portal: <https://dev.cardputer.cc/#/upload>
 
 ## Package
 
-- Debian package: `dist/displaymod_2.7.2_arm64.deb` (built with `python tools/build_win.py`)
+- Debian package: `dist/displaymod_3.1.3_arm64.deb` (built with `python tools/build_win.py`)
 - Package: `displaymod`
-- Version: `2.7.2`
+- Version: `3.1.3`
 - Architecture: `arm64` (static native binaries)
 - Maintainer: `H4W9 <H4W9@users.noreply.github.com>` (GitHub noreply, no personal email)
-- Depends: `tmux, fbset, kbd, sudo`
+- Depends: `tmux, fbset, kbd, device-tree-compiler`
 - Launcher entries: `/usr/share/APPLaunch/applications/displaymod.desktop` (DisplayMOD) and `displaymod-bigterm.desktop` (BigTermCLI, added by the app when enabled)
 - Executables: `/usr/bin/displaymod`, `/usr/bin/displaymod-ui`, `/usr/bin/displaymod-term`
-- Root helper: `/usr/lib/displaymod/displaymod-ctl` (was `/usr/sbin`, rejected by the store path check)
-- Boot service: `/usr/lib/systemd/system/displaymod.service`, `User=displaymod` (was a user unit in `/usr/lib/systemd/user`, rejected)
+- Service: `displaymod-daemon` runs `/usr/lib/displaymod/displaymod-ctl`; apps use `/usr/lib/displaymod/displaymod-send` (no sudo rule)
+- Boot service: `/usr/lib/systemd/system/displaymod.service`, `User=displaymod` + `DynamicUser=yes`, capabilities SYS_ADMIN, DAC_OVERRIDE, SYS_TTY_CONFIG, CHOWN, FOWNER
 
 ## Source and ownership
 
@@ -44,7 +44,7 @@ Settings are in the DisplayMOD app or the displaymod command over SSH. Wiring is
 
 Tested with the red "2.8 TFT SPI 240x320 V1.2" board. Touch and SD on that board are not used.
 
-A small root helper (displaymod-ctl) loads the display driver. The apps reach it through a sudo rule that only allows that helper. A service (running as the displaymod system user, not root) starts the display at boot.
+A service loads the display driver. It runs as a systemd dynamic user with a few added capabilities (not root), and the apps send it settings over a local socket. No sudo rule, no extra user account.
 ```
 
 ## Permissions
@@ -54,7 +54,7 @@ A small root helper (displaymod-ctl) loads the display driver. The apps reach it
 - IMU: no
 - Network: no (the status bar only reads the local IP)
 - Additional hardware: yes (2.8" ILI9341 SPI display on the EXT header)
-- Background service: yes (`displaymod.service` at boot, runs as the non-root `displaymod` user; mirror daemon runs as the launcher user)
+- Background service: yes (`displaymod.service` at boot, dynamic non-root user `displaymod`; it also runs the mirror)
 - External display: yes
 
 ## Assets
@@ -76,7 +76,7 @@ A small root helper (displaymod-ctl) loads the display driver. The apps reach it
 - [x] Maintainer has an email address
 - [x] 256 x 256 store icon
 - [ ] Share code free in the store index
-- [ ] 2.7.2 tested on a real CardputerZero (2.7.0 install, mirroring, detection confirmed)
+- [ ] 3.1.3 tested on a real CardputerZero
 - [ ] Owner approved submission
 
 ## Submission result
