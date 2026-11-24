@@ -239,10 +239,36 @@ static void render_bar(canvas_t *c, int info_tick)
 typedef struct {
     fb_t src, dst;
     int content_h, bar_y, bar_h, off_y;   /* off_y: top of the copy (plain layout) */
-    int *xmap, *ymap;
-    uint16_t *prev, *cur, *rowbuf, *bar, *bar_prev;
+    int *xmap, *ymap;            /* first source pixel/row for each output one */
+    unsigned char *xw, *yw;      /* weight of the next one, 0..32 */
+    uint16_t *prev, *cur, *rowbuf, *rowbuf2, *bar, *bar_prev;
     int force;
 } mirror_t;
+
+/* Output pixel i samples the source at its centre: between source s and s+1
+ * with weight w/32 on s+1. Same size maps 1:1 with no blending. */
+static void scale_map(int *map, unsigned char *w, int sn, int dn)
+{
+    for (int i = 0; i < dn; i++) {
+        if (sn == dn) { map[i] = i; w[i] = 0; continue; }
+        long p = ((2L * i + 1) * sn * 32) / (2L * dn) - 16;    /* source position in 1/32 */
+        if (p < 0) p = 0;
+        int s = (int)(p >> 5), f = (int)(p & 31);
+        if (s >= sn - 1) { s = sn - 1; f = 0; }
+        map[i] = s;
+        w[i] = (unsigned char)f;
+    }
+}
+
+/* Blend two RGB565 pixels, w/32 of b. */
+static inline uint16_t mix565(uint16_t a, uint16_t b, unsigned w)
+{
+    if (!w) return a;
+    uint32_t x = (a | (uint32_t)a << 16) & 0x07E0F81Fu;
+    uint32_t y = (b | (uint32_t)b << 16) & 0x07E0F81Fu;
+    uint32_t r = ((x * (32 - w) + y * w) >> 5) & 0x07E0F81Fu;
+    return (uint16_t)(r | r >> 16);
+}
 
 static int mirror_init(mirror_t *m)
 {
@@ -259,12 +285,16 @@ static int mirror_init(mirror_t *m)
 
     m->xmap = malloc(sizeof(int) * dw);
     m->ymap = malloc(sizeof(int) * m->content_h);
+    m->xw = malloc(dw);
+    m->yw = malloc(m->content_h);
     m->prev = calloc((size_t)sw * sh, 2);
     m->cur = calloc((size_t)sw * sh, 2);
     m->rowbuf = calloc(dw > sw ? dw : sw, 2);
-    if (!m->xmap || !m->ymap || !m->prev || !m->cur || !m->rowbuf) return -1;
-    for (int x = 0; x < dw; x++) m->xmap[x] = x * sw / dw;
-    for (int y = 0; y < m->content_h; y++) m->ymap[y] = y * sh / m->content_h;
+    m->rowbuf2 = calloc(dw > sw ? dw : sw, 2);
+    if (!m->xmap || !m->ymap || !m->xw || !m->yw || !m->prev || !m->cur || !m->rowbuf || !m->rowbuf2)
+        return -1;
+    scale_map(m->xmap, m->xw, sw, dw);
+    scale_map(m->ymap, m->yw, sh, m->content_h);
     if (m->bar_h > 0) {
         m->bar = calloc((size_t)dw * m->bar_h, 2);
         m->bar_prev = calloc((size_t)dw * m->bar_h, 2);
@@ -299,12 +329,21 @@ static int mirror_step(mirror_t *m)
 
     int identity_x = (sw == dw);
     for (int y = 0; y < m->content_h; y++) {
-        int sy = m->ymap[y];
-        if (!changed[sy]) continue;
+        int sy = m->ymap[y], wy = m->yw[y];
+        int sy2 = wy ? sy + 1 : sy;
+        if (!changed[sy] && !changed[sy2]) continue;
         const uint16_t *srow = m->cur + (size_t)sy * sw;
+        if (wy) {                                   /* between two source rows */
+            const uint16_t *s2 = m->cur + (size_t)sy2 * sw;
+            for (int x = 0; x < sw; x++) m->rowbuf2[x] = mix565(srow[x], s2[x], wy);
+            srow = m->rowbuf2;
+        }
         if (identity_x) write_row565(&m->dst, m->off_y + y, srow);
         else {
-            for (int x = 0; x < dw; x++) m->rowbuf[x] = srow[m->xmap[x]];
+            for (int x = 0; x < dw; x++) {
+                int sx = m->xmap[x];
+                m->rowbuf[x] = m->xw[x] ? mix565(srow[sx], srow[sx + 1], m->xw[x]) : srow[sx];
+            }
             write_row565(&m->dst, m->off_y + y, m->rowbuf);
         }
     }
