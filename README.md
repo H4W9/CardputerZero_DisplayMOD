@@ -1,5 +1,7 @@
 # DisplayMOD
 
+[![Build](https://github.com/H4W9/CardputerZero_DisplayMOD/actions/workflows/build.yml/badge.svg)](https://github.com/H4W9/CardputerZero_DisplayMOD/actions/workflows/build.yml)
+
 Second screen for the M5Stack CardputerZero. DisplayMOD drives a 2.8" ILI9341 SPI display (the EXT display) from the EXT header and mirrors the built-in screen onto it. It also includes BigTermCLI, a full-size terminal that runs on the EXT display.
 
 ![Built-in screen](screenshots/app_home.png) ![Settings app on the EXT display](screenshots/app_home_ext.png)
@@ -43,6 +45,12 @@ sudo reboot
 ```
 
 DisplayMOD and BigTermCLI appear in the launcher.
+
+The `.deb` is on the [Releases](https://github.com/H4W9/CardputerZero_DisplayMOD/releases) page. Each release also has the original edition's `.deb` (2.x, see below).
+
+### Releases
+
+GitHub Actions builds both `.deb`s on every push and pull request, with the same clean zig build as `tools/build_win.py`, and keeps them as workflow artifacts. Pushing a tag `v<version>` (it must match `pkg/DEBIAN/control`) makes a draft release with both `.deb`s and their SHA-256 sums attached. A draft can also be made by running the workflow by hand with "Draft a release" ticked. Drafts stay private until they are published, and a published release is never changed: bump the version for a new one.
 
 ### Upgrading from 2.x
 

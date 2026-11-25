@@ -176,7 +176,7 @@ def _ar(members, mtime):
 
 
 def pack(ver):
-    mtime = int(time.time())
+    mtime = int(os.environ.get("SOURCE_DATE_EPOCH") or time.time())   # set in CI: the commit time
     data_root = os.path.join(BUILD, "data")
     shutil.copytree(PKG, data_root, ignore=shutil.ignore_patterns("DEBIAN"))
     data_tgz, _ = _targz(data_root, mtime)

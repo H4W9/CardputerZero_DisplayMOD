@@ -1,0 +1,201 @@
+name: Build
+
+# Every push and pull request: check the scripts, render the settings app
+# with the test harness, and build both .debs (kept as workflow artifacts):
+# the store edition from the repo root and the original 2.x edition from
+# legacy/. A draft release with both .debs attached is made when a v* tag is
+# pushed, or when the workflow is run by hand with "Draft a release" ticked.
+# Drafts are only visible to you until you publish them.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      draft_release:
+        description: "Draft a release with the .debs attached"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      legacy_version: ${{ steps.meta.outputs.legacy_version }}
+      deb: ${{ steps.deb.outputs.name }}
+      legacy_deb: ${{ steps.legacy_deb.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade ziglang pillow
+
+      - name: Read versions
+        id: meta
+        run: |
+          check() { # DIR -> prints the version, fails if README or PUBLISH.md disagree
+            v=$(sed -n 's/^Version: //p' "$1/pkg/DEBIAN/control" | tr -d '\r')
+            readme=$(sed -n 's/.*displaymod_\([0-9][0-9.]*\)_arm64\.deb.*/\1/p' "$1/README.md" | sort -u)
+            publish=$(sed -n 's/^- Version: `\(.*\)`.*/\1/p' "$1/PUBLISH.md" | tr -d '\r')
+            echo "$1: control $v, README $readme, PUBLISH.md $publish" >&2
+            if [ "$v" != "$readme" ] || [ "$v" != "$publish" ]; then
+              echo "::error::Version numbers in $1 don't match" >&2
+              return 1
+            fi
+            echo "$v"
+          }
+          version=$(check .)
+          legacy=$(check legacy)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "legacy_version=$legacy" >> "$GITHUB_OUTPUT"
+
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "v${{ steps.meta.outputs.version }}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} but the package version is ${{ steps.meta.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Check shell scripts
+        run: |
+          for f in $(git ls-files pkg legacy/pkg); do
+            case "$(head -1 "$f")" in
+              "#!/bin/bash"*) bash -n "$f" && echo "ok (bash) $f" ;;
+              "#!/bin/sh"*) sh -n "$f" && echo "ok (sh)   $f" ;;
+            esac
+          done
+
+      - name: Build .deb (store edition)
+        id: deb
+        run: |
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          python tools/build_win.py
+          echo "name=displaymod_${{ steps.meta.outputs.version }}_arm64.deb" >> "$GITHUB_OUTPUT"
+
+      - name: Build .deb (original edition)
+        id: legacy_deb
+        run: |
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          python legacy/tools/build_win.py
+          echo "name=displaymod_${{ steps.meta.outputs.legacy_version }}_arm64.deb" >> "$GITHUB_OUTPUT"
+
+      - name: Render the settings app (test harness)
+        run: python tools/make_screenshots.py
+
+      - name: Check the packages
+        run: |
+          check_deb() { # DEB FILES...: the files must be in the package
+            deb=$1; shift
+            echo "== $deb"
+            dpkg-deb --info "$deb"
+            dpkg-deb --contents "$deb"
+            for f in "$@"; do
+              dpkg-deb --contents "$deb" | grep -q " $f\$" || { echo "::error::$deb is missing $f"; exit 1; }
+            done
+            x=$(mktemp -d)
+            dpkg-deb -x "$deb" "$x"
+            for b in usr/bin/displaymod-ui usr/bin/displaymod-term usr/lib/displaymod/displaymod-mirror \
+                     usr/lib/displaymod/displaymod-probe; do
+              file "$x/$b" | tee /dev/stderr | grep -q "ARM aarch64" || { echo "::error::$b is not aarch64"; exit 1; }
+            done
+            for b in usr/lib/displaymod/displaymod-daemon usr/lib/displaymod/displaymod-send; do
+              [ -e "$x/$b" ] || continue
+              file "$x/$b" | tee /dev/stderr | grep -q "ARM aarch64" || { echo "::error::$b is not aarch64"; exit 1; }
+            done
+            rm -rf "$x"
+            (cd "$(dirname "$deb")" && sha256sum "$(basename "$deb")" | tee "$(basename "$deb").sha256")
+          }
+          check_deb "dist/${{ steps.deb.outputs.name }}" \
+            ./usr/share/APPLaunch/applications/displaymod.desktop \
+            ./usr/share/APPLaunch/applications/displaymod-bigterm.desktop \
+            ./usr/share/APPLaunch/share/images/displaymod_100.png \
+            ./usr/share/APPLaunch/share/images/displaymod_bigterm_100.png \
+            ./usr/lib/systemd/system/displaymod.service \
+            ./usr/bin/displaymod ./usr/bin/displaymod-ui ./usr/bin/displaymod-term \
+            ./usr/lib/displaymod/displaymod-ctl ./usr/lib/displaymod/displaymod-mirror \
+            ./usr/lib/displaymod/displaymod-probe ./usr/lib/displaymod/displaymod-daemon \
+            ./usr/lib/displaymod/displaymod-send
+          check_deb "legacy/dist/${{ steps.legacy_deb.outputs.name }}" \
+            ./usr/share/APPLaunch/applications/displaymod.desktop \
+            ./usr/share/APPLaunch/share/images/displaymod_100.png \
+            ./usr/share/APPLaunch/share/images/displaymod_bigterm_100.png \
+            ./usr/lib/systemd/system/displaymod.service \
+            ./usr/bin/displaymod ./usr/bin/displaymod-ui ./usr/bin/displaymod-term \
+            ./usr/lib/displaymod/displaymod-ctl ./usr/lib/displaymod/displaymod-mirror \
+            ./usr/lib/displaymod/displaymod-probe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.deb.outputs.name }}
+          path: |
+            dist/${{ steps.deb.outputs.name }}
+            dist/${{ steps.deb.outputs.name }}.sha256
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: legacy-${{ steps.legacy_deb.outputs.name }}
+          path: |
+            legacy/dist/${{ steps.legacy_deb.outputs.name }}
+            legacy/dist/${{ steps.legacy_deb.outputs.name }}.sha256
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: |
+            screenshots/*.png
+            store/screenshots/*.png
+
+  draft-release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.draft_release)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.deb }}
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: legacy-${{ needs.build.outputs.legacy_deb }}
+          path: dist/legacy
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ needs.build.outputs.version }}
+          DEB: dist/${{ needs.build.outputs.deb }}
+          LEGACY: dist/legacy/${{ needs.build.outputs.legacy_deb }}
+        run: |
+          # Both editions are named displaymod_<ver>_arm64.deb; the versions differ (3.x / 2.x).
+          sum=$(cut -d' ' -f1 "$DEB.sha256")
+          lsum=$(cut -d' ' -f1 "$LEGACY.sha256")
+          notes=$(printf 'DisplayMOD %s\n\nInstall on the CardputerZero:\n\n```\nsudo apt install ./%s\nsudo reboot\n```\n\nSHA-256: `%s`\n\n`%s` is the original edition (sudo rule and root helper, not for the app store). Install one edition or the other, not both.\n\nSHA-256: `%s`\n' \
+                  "${TAG#v}" "$(basename "$DEB")" "$sum" "$(basename "$LEGACY")" "$lsum")
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = "true" ]; then
+              echo "Draft $TAG already exists: replacing its .debs."
+              gh release upload "$TAG" "$DEB" "$LEGACY" --clobber
+            else
+              echo "::notice::$TAG is already published; left as it is. Bump the version for a new release."
+            fi
+          else
+            gh release create "$TAG" "$DEB" "$LEGACY" --draft --target "$GITHUB_SHA" \
+              --title "DisplayMOD ${TAG#v}" --notes "$notes"
+          fi
