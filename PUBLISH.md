@@ -4,9 +4,9 @@ Portal: <https://dev.cardputer.cc/#/upload>
 
 ## Package
 
-- Debian package: `dist/displaymod_3.1.5_arm64.deb` (built with `python tools/build_win.py`)
+- Debian package: `dist/displaymod_3.1.7_arm64.deb` (built with `python tools/build_win.py`)
 - Package: `displaymod`
-- Version: `3.1.5`
+- Version: `3.1.7`
 - Architecture: `arm64` (static native binaries)
 - Maintainer: `H4W9 <H4W9@users.noreply.github.com>` (GitHub noreply, no personal email)
 - Depends: `tmux, fbset, kbd, device-tree-compiler`
@@ -76,7 +76,7 @@ A service loads the display driver. It runs as a systemd dynamic user with a few
 - [x] Maintainer has an email address
 - [x] 256 x 256 store icon
 - [ ] Share code free in the store index
-- [ ] 3.1.5 tested on a real CardputerZero
+- [ ] 3.1.7 tested on a real CardputerZero
 - [ ] Owner approved submission
 
 ## Submission result

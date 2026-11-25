@@ -453,11 +453,15 @@ int main(void)
 
     int shift = 0, ctrl = 0, alt = 0, fn = 0, help = 0, scrolled = 0;
     uint64_t esc_down = 0, last_draw = 0, last_info = 0;
+    /* Holding a key repeats it with the launcher's timing: after 500 ms, every 50 ms.
+     * The keyboard driver sends no repeats, so they are made here. */
+    int rep_code = 0;
+    uint64_t rep_next = 0;
     int force = 1;
 
     while (!g_stop) {
         struct pollfd pf[2] = {{kfd, POLLIN, 0}, {pty, POLLIN, 0}};
-        poll(pf, 2, esc_down ? 100 : 500);
+        poll(pf, 2, rep_code ? 20 : esc_down ? 100 : 500);
         uint64_t t = now_ms();
 
         if (relight_at && t >= relight_at) {
@@ -487,8 +491,22 @@ int main(void)
         }
 
         struct input_event ev;
-        while (read(kfd, &ev, sizeof ev) == (ssize_t)sizeof ev) {
-            if (ev.type != EV_KEY) continue;
+        for (;;) {
+            if (read(kfd, &ev, sizeof ev) == (ssize_t)sizeof ev) {
+                if (ev.type != EV_KEY || ev.value == 2) continue;   /* repeats are made below */
+                switch (ev.code) {
+                case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT: case KEY_LEFTCTRL: case KEY_RIGHTCTRL:
+                case KEY_LEFTALT: case KEY_RIGHTALT: case KEY_FN: break;
+                default:
+                    if (ev.value) { rep_code = ev.code; rep_next = t + 500; }
+                    else if (ev.code == rep_code) rep_code = 0;
+                }
+            } else if (rep_code && t >= rep_next) {
+                ev.type = EV_KEY;                 /* the held key again */
+                ev.code = rep_code;
+                ev.value = 2;
+                rep_next = t + 50;
+            } else break;
             int down = ev.value != 0, code = ev.code;
             switch (code) {
             case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT: shift = down; continue;

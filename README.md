@@ -38,7 +38,7 @@ Leave the touch (T_*) and SD pins unconnected and don't use pin 2 (5V in). Power
 Copy the `.deb` to the CardputerZero, then:
 
 ```
-sudo apt install ./displaymod_3.1.5_arm64.deb
+sudo apt install ./displaymod_3.1.7_arm64.deb
 sudo reboot
 ```
 

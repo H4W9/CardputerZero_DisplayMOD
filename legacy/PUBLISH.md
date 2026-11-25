@@ -6,9 +6,9 @@ Portal: <https://dev.cardputer.cc/#/upload>
 
 ## Package
 
-- Debian package: `dist/displaymod_2.8.4_arm64.deb` (built with `python tools/build_win.py`)
+- Debian package: `dist/displaymod_2.8.6_arm64.deb` (built with `python tools/build_win.py`)
 - Package: `displaymod`
-- Version: `2.8.4`
+- Version: `2.8.6`
 - Architecture: `arm64` (static native binaries)
 - Maintainer: `H4W9 <H4W9@users.noreply.github.com>` (GitHub noreply, no personal email)
 - Depends: `tmux, fbset, kbd, sudo`
@@ -78,7 +78,7 @@ A small root helper (displaymod-ctl) loads the display driver. The apps reach it
 - [x] Maintainer has an email address
 - [x] 256 x 256 store icon
 - [ ] Share code free in the store index
-- [ ] 2.8.4 tested on a real CardputerZero (2.7.0 install, mirroring, detection confirmed)
+- [ ] 2.8.6 tested on a real CardputerZero (2.7.0 install, mirroring, detection confirmed)
 - [ ] Owner approved submission
 
 ## Submission result

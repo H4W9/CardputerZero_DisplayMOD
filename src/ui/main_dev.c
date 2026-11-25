@@ -140,23 +140,48 @@ static uint32_t map_key(int code)
     }
 }
 
+/* Holding an arrow key repeats it with the launcher's timing: after REP_DELAY ms,
+ * every REP_RATE ms. The keyboard driver sends no repeats of its own, so
+ * each repeat is a fresh press (the next read reports the release). */
+#define REP_DELAY 500
+#define REP_RATE 50
+
+static int repeats(uint32_t k)
+{
+    return k == LV_KEY_UP || k == LV_KEY_DOWN || k == LV_KEY_LEFT || k == LV_KEY_RIGHT;
+}
+
 static void kbd_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
-    static uint32_t last_key;
+    static uint32_t last_key, held_key, next_rep;
     struct input_event ev;
     data->key = last_key;
     data->state = LV_INDEV_STATE_RELEASED;
     while (g_kfd >= 0 && read(g_kfd, &ev, sizeof ev) == (ssize_t)sizeof ev) {
-        if (ev.type != EV_KEY || ev.value == 2) continue;   /* ignore autorepeat */
+        if (ev.type != EV_KEY || ev.value == 2) continue;   /* repeats are made below */
         uint32_t k = map_key(ev.code);
         if (!k) continue;
         if (g_error && k == LV_KEY_ESC) g_exit = 1;
+        if (ev.value) {
+            held_key = repeats(k) ? k : 0;
+            next_rep = tick_ms() + REP_DELAY;
+        } else if (k == held_key) held_key = 0;
         last_key = k;
         data->key = k;
         data->state = ev.value ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
         data->continue_reading = true;   /* deliver every press/release */
         return;
+    }
+    static int rep_down;                 /* a repeat press was just reported */
+    if (rep_down) { rep_down = 0; return; }   /* its release */
+    if (held_key && (int32_t)(tick_ms() - next_rep) >= 0) {
+        next_rep = tick_ms() + REP_RATE;
+        last_key = held_key;
+        data->key = held_key;
+        data->state = LV_INDEV_STATE_PRESSED;
+        rep_down = 1;
+        data->continue_reading = true;   /* its release right away */
     }
 }
 
@@ -197,6 +222,7 @@ int main(void)
     lv_indev_t *kp = lv_indev_create();
     lv_indev_set_type(kp, LV_INDEV_TYPE_KEYPAD);
     lv_indev_set_read_cb(kp, kbd_read);
+    lv_timer_set_period(lv_indev_get_read_timer(kp), 10);   /* keeps the 50 ms repeat even */
 
     lv_group_t *group = lv_group_create();
     lv_indev_set_group(kp, group);
