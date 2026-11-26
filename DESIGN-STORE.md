@@ -37,7 +37,7 @@ Upgrading from 2.7.x leaves the old sudo rule and the `displaymod` system user i
 
 ## Phases
 
-0. **Feasibility (done 2026-11-23):** everything passed except `dtoverlay`, which refuses non-root callers. configfs and `dtmerge` work.
+0. **Feasibility (done 2026-11-23):** everything passed except `dtoverlay`, which refuses non-root callers. configfs and `dtmerge` work. (Since 3.1.13 both overlays are built with `dtc`, as Gh0st OS has no `dtmerge`.)
    Original step: run `tools/captest.sh` on the device as a dynamic user with these capabilities, and settle the open questions from its output.
 **Phases 1-3 done 2026-11-23** (3.0.0 built, 0 store path violations, no flagged commands in the scripts). Not device-tested.
 

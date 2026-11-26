@@ -3,7 +3,7 @@ fn+Z / C       cursor left / right
 fn+K / N       line start / end
 shift+fn+L/M   scroll back / forward
 fn+1 .. 0      F1 .. F10
-F6 (fn+6)      change text size
+F6 (fn+6)      next font
 ctrl+key       control keys
 ctrl+B then D  leave, keep session
 exit           end the session

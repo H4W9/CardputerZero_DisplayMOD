@@ -26,7 +26,7 @@ BT=/usr/share/APPLaunch/applications/displaymod-bigterm.desktop
 OVDIR=/sys/kernel/config/device-tree/overlays
 OVSRC=/boot/firmware/overlays
 [ -d "$OVSRC" ] || OVSRC=/boot/overlays
-KEYS="MODE BIGTERM MIRROR_LAYOUT ALIGN BORDER_COLOR BUILTIN_OFF SLEEP HISTORY HIST_SIZE HIST_DUPS DIM_BUILTIN DETECT BRIGHTNESS ROTATE FONT SPEED BGR TTY DC RST LED"
+KEYS="MODE BIGTERM MIRROR_LAYOUT ALIGN BORDER_COLOR BUILTIN_OFF SLEEP CLOCK HISTORY HIST_SIZE HIST_DUPS DIM_BUILTIN DETECT BRIGHTNESS ROTATE FONT SPEED BGR TTY DC RST LED"
 
 [ "${DM_DAEMON:-}" = 1 ] || { echo "Use displaymod-send (displaymod-ctl runs inside displaymod.service)"; exit 1; }
 umask 022
@@ -35,12 +35,14 @@ umask 022
 # shellcheck disable=SC2034  # read via "get" (eval)
 load_conf() {
   MODE=mirror; BIGTERM=1; MIRROR_LAYOUT=bar; DIM_BUILTIN=1; DETECT=1; BRIGHTNESS=sync
-  BORDER_COLOR=black; ALIGN=center; BUILTIN_OFF=0; SLEEP=5
+  BORDER_COLOR=black; ALIGN=center; BUILTIN_OFF=0; SLEEP=5; CLOCK=24
   HISTORY=1; HIST_SIZE=1000; HIST_DUPS=1
-  ROTATE=90; FONT=6x12; SPEED=16000000; BGR=0; TTY=auto
+  ROTATE=90; FONT=t12; SPEED=16000000; BGR=0; TTY=auto
   DC=23; RST=22; LED=26
   # shellcheck disable=SC1090
   [ -f "$CONF" ] && . "$CONF"
+  # BigTermCLI fonts; names from earlier versions fall back to Terminus 12
+  case "$FONT" in t12|t14|t16|t18|t20|v8|v16) ;; *) FONT=t12 ;; esac
   # Pins are fixed: the only free GPIOs on the EXT header (pins 3, 5, 1).
   # The rest are SPI, I2C, UART or power, so they can't be changed.
   DC=23; RST=22; LED=26
@@ -67,10 +69,11 @@ valid() { # key value
     BORDER_COLOR)  case "$2" in black|charcoal|slate|navy|teal|green|maroon|purple|white) return 0 ;; esac ;;
     BIGTERM|DIM_BUILTIN|BGR|DETECT|BUILTIN_OFF|HISTORY|HIST_DUPS) case "$2" in 0|1) return 0 ;; esac ;;
     SLEEP)         case "$2" in 0|1|2|5|10|30) return 0 ;; esac ;;
+    CLOCK)         case "$2" in 12|24) return 0 ;; esac ;;
     HIST_SIZE)     case "$2" in 100|500|1000|5000) return 0 ;; esac ;;
     BRIGHTNESS)    case "$2" in sync|10|20|30|40|50|60|70|80|90|100) return 0 ;; esac ;;
     ROTATE)        case "$2" in 0|90|180|270) return 0 ;; esac ;;
-    FONT)          case "$2" in 8x16|6x12|8x8) return 0 ;; esac ;;
+    FONT)          case "$2" in t12|t14|t16|t18|t20|v8|v16) return 0 ;; esac ;;
     SPEED)         case "$2" in 8000000|16000000|24000000|32000000) return 0 ;; esac ;;
     TTY)           case "$2" in auto|fg|[7-9]|1[0-2]) return 0 ;; esac ;;
   esac
@@ -115,13 +118,13 @@ pick_tty() {
   echo "$t"
 }
 
-font_file() {
+font_file() { # BigTermCLI's console font (all shipped in the package)
   case "$FONT" in
-    8x8)  f=Uni2-VGA8.psf.gz ;;
-    6x12) f=Lat15-Terminus12x6.psf.gz ;;
-    *)    f=Uni2-VGA16.psf.gz ;;
+    t*)  f="ter-u${FONT#t}n.psf.gz" ;;                 # Terminus, the CardputerZero OS terminal font
+    v*)  f="vga8x${FONT#v}.psf.gz" ;;                  # the Linux console's VGA fonts
   esac
-  [ -f "/usr/share/consolefonts/$f" ] && echo "/usr/share/consolefonts/$f"
+  f="/usr/share/displaymod/fonts/$f"
+  [ -f "$f" ] && echo "$f"
 }
 
 builtin_bl() { # on | off
@@ -159,11 +162,58 @@ ov_apply() { # name dtbo-file
   return 1
 }
 
-ov_load() { # name param=value...: a stock overlay with simple parameters
-  n=$1; shift
-  [ -f "$OVSRC/$n.dtbo" ] || return 1
-  dtmerge "$OVSRC/$n.dtbo" "$RUN/$n.dtbo" - "$@" || return 1
-  ov_apply "$n" "$RUN/$n.dtbo"
+# Software PWM on the LED pin, for dimming. Built here like the panel overlay
+# (same nodes as the stock pwm-gpio overlay), so it doesn't need dtmerge,
+# which some systems (Gh0st OS) don't have.
+pwm_dts() { # gpio
+  cat <<DTS
+/dts-v1/;
+/plugin/;
+/ {
+	compatible = "brcm,bcm2835";
+	fragment@0 {
+		target = <&gpio>;
+		__overlay__ {
+			dm_pwm_pins: dm_pwm_pins {
+				brcm,pins = <$1>;
+				brcm,function = <1>;
+				brcm,pull = <0>;
+			};
+		};
+	};
+	fragment@1 {
+		target-path = "/";
+		__overlay__ {
+			dm_pwm_gpio {
+				compatible = "pwm-gpio";
+				pinctrl-names = "default";
+				pinctrl-0 = <&dm_pwm_pins>;
+				gpios = <&gpio $1 0>;
+			};
+		};
+	};
+};
+DTS
+}
+
+pwm_chip() { # the pwm-gpio PWM controller, once its driver has bound
+  for c in /sys/class/pwm/pwmchip*; do
+    [ "$(basename "$(readlink -f "$c/device/driver" 2>/dev/null)")" = pwm-gpio ] && { echo "$c"; return 0; }
+  done
+  return 1
+}
+
+pwm_overlay() { # gpio: load it and wait for the driver, else say why not
+  pwm_dts "$1" > "$RUN/pwm.dts"
+  dtc -q -I dts -O dtb -o "$RUN/pwm.dtbo" "$RUN/pwm.dts" || { echo "dtc could not build the pwm-gpio overlay"; return 1; }
+  ov_apply pwm-gpio "$RUN/pwm.dtbo" || return 1
+  i=0
+  while [ $i -lt 20 ]; do                 # the driver module loads on its own (udev)
+    pwm_chip >/dev/null && return 0
+    sleep 0.1; i=$((i + 1))
+  done
+  echo "the pwm-gpio driver did not start (modinfo pwm-gpio)"
+  return 1
 }
 
 # The stock fbtft overlay picks the panel type by switching fragments on,
@@ -257,9 +307,10 @@ panel_up() {
   fi
   # Backlight: software PWM on the LED pin for dimming when the kernel has it,
   # otherwise the display driver switches it on/off.
-  if [ -f "$OVSRC/pwm-gpio.dtbo" ] && ov_load pwm-gpio gpio="$LED" >/dev/null 2>&1; then
+  if out=$(pwm_overlay "$LED" 2>&1); then
     led=""
   else
+    echo "Note: the pwm-gpio overlay did not load, so the EXT brightness is on/off only: $out"
     ov_remove pwm-gpio
     led=$LED
   fi
@@ -286,6 +337,8 @@ pwm_up() { # export the pwm-gpio channel for the mirror
     echo "$c/pwm0" > "$RUN/pwm"
     return 0
   done
+  echo "Note: pwm-gpio loaded but no pwm-gpio PWM channel appeared (modinfo pwm-gpio), so the EXT brightness stays fixed"
+  return 1
 }
 
 pwm_down() {
@@ -410,6 +463,8 @@ status() {
     echo "Mirror RAM|$(awk '/VmRSS/ {printf "%d KB", $2}' "/proc/$pid/status" 2>/dev/null)"
   fi
   [ -r "$V5" ] && echo "Header 5V|$(cat "$V5")"
+  if [ -s "$RUN/pwm" ]; then echo "EXT dimming|yes"
+  elif [ -n "$p" ]; then echo "EXT dimming|no, on/off only"; fi
 }
 
 # ---------- main ----------
@@ -425,7 +480,7 @@ case "$cmd" in
     load_conf
     case "$2" in
       DC|RST|LED|ROTATE|SPEED|BGR) if [ "$MODE" = off ]; then bigterm_entry; else reload_panel; fi ;;
-      DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|HISTORY|HIST_SIZE|HIST_DUPS) ;;   # read live by BigTermCLI / the mirror
+      DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|CLOCK|HISTORY|HIST_SIZE|HIST_DUPS) ;;   # read live by BigTermCLI / the mirror
       BIGTERM) bigterm_entry ;;
       FONT) if [ -s "$RUN/tty" ]; then f=$(font_file); [ -n "$f" ] && setfont -C "/dev/tty$(cat "$RUN/tty")" "$f" 2>/dev/null; fi ;;
       TTY) if [ "$MODE" = off ]; then bigterm_entry; else stop_view; unmap_tty; apply; fi ;;
@@ -448,7 +503,7 @@ case "$cmd" in
         DC|RST|LED|ROTATE|SPEED|BGR) need=panel ;;
         TTY) [ "$need" = panel ] || need=console ;;
         FONT) [ -n "$need" ] || need=font ;;
-        DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|HISTORY|HIST_SIZE|HIST_DUPS|BIGTERM) ;;
+        DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|CLOCK|HISTORY|HIST_SIZE|HIST_DUPS|BIGTERM) ;;
         *) case "$need" in ''|font) need=apply ;; esac ;;
       esac
       shift 2

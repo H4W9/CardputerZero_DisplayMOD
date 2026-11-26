@@ -8,7 +8,9 @@
 #include <netinet/in.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "font_dm.h"
 
@@ -62,6 +64,40 @@ static void draw_big(canvas_t *c, int x, int y, const char *s, uint16_t col)
         if (i >= 0) draw_glyph(c, colon ? x - 4 : x, y, dm_big[i], DM_BIG_W, DM_BIG_H, col);
         x += colon ? DM_BIG_W * 2 / 3 : DM_BIG_W;
     }
+}
+
+/* The clock: "14:05", or "2:05" and "PM" with the 12-hour clock (the big
+ * font has only digits and ':', so AM/PM is drawn small beside it).
+ * DM_FAKE_TIME="HH:MM" fixes the time for screenshots. */
+static void clock_text(char *hm, size_t n, char *ampm, size_t an, int h12)
+{
+    time_t t = time(NULL);
+    struct tm tm;
+    localtime_r(&t, &tm);
+    int H = tm.tm_hour, M = tm.tm_min;
+    const char *fake = getenv("DM_FAKE_TIME");
+    if (fake) sscanf(fake, "%d:%d", &H, &M);
+    if (h12) {
+        snprintf(hm, n, "%d:%02d", H % 12 ? H % 12 : 12, M);
+        snprintf(ampm, an, "%s", H < 12 ? "AM" : "PM");
+    } else {
+        snprintf(hm, n, "%02d:%02d", H, M);
+        if (an) ampm[0] = 0;
+    }
+}
+
+static int big_width(const char *s)
+{
+    int w = 0;
+    for (; *s; s++) w += (*s == ':') ? DM_BIG_W * 2 / 3 : DM_BIG_W;
+    return w;
+}
+
+/* Big time with AM/PM (if any) small at its lower right */
+static void draw_clock(canvas_t *c, int x, int y, const char *hm, const char *ampm, uint16_t col)
+{
+    draw_big(c, x, y, hm, col);
+    if (ampm[0]) draw_small(c, x + big_width(hm) + 4, y + DM_BIG_H - DM_SMALL_H - 4, ampm, col);
 }
 
 static int read_int(const char *path, long *out)

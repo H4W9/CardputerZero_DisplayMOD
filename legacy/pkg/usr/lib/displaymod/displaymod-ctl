@@ -24,7 +24,7 @@ VIEW=displaymod-view.service
 VIEWUNIT=/run/systemd/system/$VIEW
 BT_SRC=$LIB/displaymod-bigterm.desktop
 BT_DST=/usr/share/APPLaunch/applications/displaymod-bigterm.desktop
-KEYS="MODE BIGTERM MIRROR_LAYOUT ALIGN BORDER_COLOR BUILTIN_OFF SLEEP HISTORY HIST_SIZE HIST_DUPS DIM_BUILTIN DETECT BRIGHTNESS ROTATE FONT SPEED BGR TTY DC RST LED"
+KEYS="MODE BIGTERM MIRROR_LAYOUT ALIGN BORDER_COLOR BUILTIN_OFF SLEEP CLOCK HISTORY HIST_SIZE HIST_DUPS DIM_BUILTIN DETECT BRIGHTNESS ROTATE FONT SPEED BGR TTY DC RST LED"
 
 [ "$(id -u)" = 0 ] || { echo "displaymod-ctl must run as root"; exit 1; }
 
@@ -32,12 +32,14 @@ KEYS="MODE BIGTERM MIRROR_LAYOUT ALIGN BORDER_COLOR BUILTIN_OFF SLEEP HISTORY HI
 # shellcheck disable=SC2034  # read via "get" (eval)
 load_conf() {
   MODE=mirror; BIGTERM=1; MIRROR_LAYOUT=bar; DIM_BUILTIN=1; DETECT=1; BRIGHTNESS=sync
-  BORDER_COLOR=black; ALIGN=center; BUILTIN_OFF=0; SLEEP=5
+  BORDER_COLOR=black; ALIGN=center; BUILTIN_OFF=0; SLEEP=5; CLOCK=24
   HISTORY=1; HIST_SIZE=1000; HIST_DUPS=1
-  ROTATE=90; FONT=6x12; SPEED=16000000; BGR=0; TTY=auto
+  ROTATE=90; FONT=t12; SPEED=16000000; BGR=0; TTY=auto
   DC=23; RST=22; LED=26; USER_NAME=pi
   # shellcheck disable=SC1090
   [ -f "$CONF" ] && . "$CONF"
+  # BigTermCLI fonts; names from earlier versions fall back to Terminus 12
+  case "$FONT" in t12|t14|t16|t18|t20|v8|v16) ;; *) FONT=t12 ;; esac
   # Pins are fixed: the only free GPIOs on the EXT header (pins 3, 5, 1).
   # The rest are SPI, I2C, UART or power, so they can't be changed.
   DC=23; RST=22; LED=26
@@ -53,10 +55,11 @@ valid() { # key value
     BORDER_COLOR)  case "$2" in black|charcoal|slate|navy|teal|green|maroon|purple|white) return 0 ;; esac ;;
     BIGTERM|DIM_BUILTIN|BGR|DETECT|BUILTIN_OFF|HISTORY|HIST_DUPS) case "$2" in 0|1) return 0 ;; esac ;;
     SLEEP)         case "$2" in 0|1|2|5|10|30) return 0 ;; esac ;;
+    CLOCK)         case "$2" in 12|24) return 0 ;; esac ;;
     HIST_SIZE)     case "$2" in 100|500|1000|5000) return 0 ;; esac ;;
     BRIGHTNESS)    case "$2" in sync|10|20|30|40|50|60|70|80|90|100) return 0 ;; esac ;;
     ROTATE)        case "$2" in 0|90|180|270) return 0 ;; esac ;;
-    FONT)          case "$2" in 8x16|6x12|8x8) return 0 ;; esac ;;
+    FONT)          case "$2" in t12|t14|t16|t18|t20|v8|v16) return 0 ;; esac ;;
     SPEED)         case "$2" in 8000000|16000000|24000000|32000000) return 0 ;; esac ;;
     TTY)           case "$2" in auto|[1-6]) return 0 ;; esac ;;
   esac
@@ -99,13 +102,13 @@ pick_tty() {
   echo "$t"
 }
 
-font_file() {
+font_file() { # BigTermCLI's console font (all shipped in the package)
   case "$FONT" in
-    8x8)  f=Uni2-VGA8.psf.gz ;;
-    6x12) f=Lat15-Terminus12x6.psf.gz ;;
-    *)    f=Uni2-VGA16.psf.gz ;;
+    t*)  f="ter-u${FONT#t}n.psf.gz" ;;                 # Terminus, the CardputerZero OS terminal font
+    v*)  f="vga8x${FONT#v}.psf.gz" ;;                  # the Linux console's VGA fonts
   esac
-  [ -f "/usr/share/consolefonts/$f" ] && echo "/usr/share/consolefonts/$f"
+  f="/usr/share/displaymod/fonts/$f"
+  [ -f "$f" ] && echo "$f"
 }
 
 builtin_bl() { # on | off
@@ -165,9 +168,13 @@ panel_up() {
   [ "$BGR" = 1 ] && extra="bgr=on"
   # Backlight: software PWM on the LED pin for dimming when the kernel has it,
   # otherwise the display driver switches it on/off.
-  if [ -f /boot/firmware/overlays/pwm-gpio.dtbo ] && dtoverlay pwm-gpio gpio="$LED" 2>/dev/null; then
+  if [ ! -f /boot/firmware/overlays/pwm-gpio.dtbo ]; then
+    echo "Note: no pwm-gpio overlay, so the EXT brightness is on/off only"
+    led="led_pin=$LED"
+  elif dtoverlay pwm-gpio gpio="$LED"; then
     led=""
   else
+    echo "Note: the pwm-gpio overlay did not load, so the EXT brightness is on/off only"
     led="led_pin=$LED"
   fi
   # shellcheck disable=SC2086
@@ -191,6 +198,8 @@ pwm_up() { # export the pwm-gpio channel and let the mirror (launcher user) set 
     echo "$c/pwm0" > "$RUN/pwm"
     return 0
   done
+  echo "Note: pwm-gpio loaded but no pwm-gpio PWM channel appeared (modinfo pwm-gpio), so the EXT brightness stays fixed"
+  return 1
 }
 
 pwm_down() {
@@ -318,6 +327,8 @@ status() {
     echo "Mirror RAM|$(awk '/VmRSS/ {printf "%d KB", $2}' "/proc/$pid/status" 2>/dev/null)"
   fi
   [ -r "$V5" ] && echo "Header 5V|$(cat "$V5")"
+  if [ -s "$RUN/pwm" ]; then echo "EXT dimming|yes"
+  elif [ -n "$p" ]; then echo "EXT dimming|no, on/off only"; fi
 }
 
 # ---------- main ----------
@@ -331,7 +342,7 @@ case "$cmd" in
     load_conf
     case "$2" in
       DC|RST|LED|ROTATE|SPEED|BGR) if [ "$MODE" = off ]; then bigterm_entry; else reload_panel; fi ;;
-      DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|HISTORY|HIST_SIZE|HIST_DUPS) ;;   # read live by BigTermCLI / the mirror
+      DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|CLOCK|HISTORY|HIST_SIZE|HIST_DUPS) ;;   # read live by BigTermCLI / the mirror
       BIGTERM) bigterm_entry ;;
       TTY|FONT) if [ "$MODE" = off ]; then bigterm_entry; else systemctl stop "$VIEW" 2>/dev/null; unmap_tty; apply; fi ;;
       *) apply ;;
@@ -352,7 +363,7 @@ case "$cmd" in
       case "$1" in
         DC|RST|LED|ROTATE|SPEED|BGR) need=panel ;;
         TTY|FONT) [ "$need" = panel ] || need=console ;;
-        DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|HISTORY|HIST_SIZE|HIST_DUPS|BIGTERM) ;;
+        DIM_BUILTIN|BRIGHTNESS|BORDER_COLOR|BUILTIN_OFF|SLEEP|CLOCK|HISTORY|HIST_SIZE|HIST_DUPS|BIGTERM) ;;
         *) [ -n "$need" ] || need=apply ;;
       esac
       shift 2

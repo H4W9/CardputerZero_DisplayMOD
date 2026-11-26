@@ -33,7 +33,7 @@ done
 echo "== device tree overlays"
 try "dtoverlay -l" dtoverlay -l
 out=$(dtoverlay displaymod-captest-none 2>&1); echo "      dtoverlay as this user says: $(echo "$out" | head -n 1)"
-command -v dtmerge >/dev/null && ok "dtmerge present" || bad "dtmerge missing"
+command -v dtc >/dev/null && ok "dtc present" || bad "dtc missing (device-tree-compiler)"
 OV=/sys/kernel/config/device-tree/overlays
 if [ -d "$OV" ]; then
   if mkdir "$OV/displaymod-captest" 2>/dev/null; then

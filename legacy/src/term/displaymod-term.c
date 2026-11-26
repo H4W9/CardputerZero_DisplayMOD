@@ -45,6 +45,23 @@
 #define KEY_FN 0x1d0
 #endif
 
+/* BigTermCLI fonts, same order as the DisplayMOD app and F6: Terminus (the
+ * CardputerZero OS terminal font) and the console's VGA fonts; cols x rows
+ * on the 320x240 display. */
+typedef struct { const char *name; unsigned short cols, rows; } font_t;
+static const font_t FONTS[] = {
+    {"t12", 53, 20}, {"t14", 40, 17}, {"t16", 40, 15}, {"t18", 32, 13}, {"t20", 32, 12},
+    {"v8", 40, 30}, {"v16", 40, 15},
+};
+#define NFONTS (int)(sizeof FONTS / sizeof FONTS[0])
+
+static const font_t *font_find(const char *name)
+{
+    for (int i = 0; i < NFONTS; i++)
+        if (!strcmp(FONTS[i].name, name)) return &FONTS[i];
+    return &FONTS[0];
+}
+
 static volatile sig_atomic_t g_stop;
 static void on_signal(int s) { (void)s; g_stop = 1; }
 
@@ -252,19 +269,19 @@ static void render_status(canvas_t *c, int help_open, int info_tick)
     const uint16_t DIMC = rgb(0x6E, 0x76, 0x81), ACC = rgb(0x39, 0xC5, 0xCF), LINE = rgb(0x30, 0x36, 0x3D);
     for (int i = 0; i < c->w * c->h; i++) c->px[i] = BG;
 
-    char hm[8], date[24];
+    char hm[12], ampm[4], date[24], clk[4];
     time_t t = time(NULL);
     struct tm tm;
     localtime_r(&t, &tm);
-    const char *fake = getenv("DM_FAKE_TIME");
-    if (fake) snprintf(hm, sizeof hm, "%s", fake); else strftime(hm, sizeof hm, "%H:%M", &tm);
+    conf_get("CLOCK", clk, sizeof clk, "24");           /* read live: the app changes it */
+    clock_text(hm, sizeof hm, ampm, sizeof ampm, atoi(clk) == 12);
     strftime(date, sizeof date, "%a %d %b", &tm);
 
     draw_small(c, 10, 6, "BigTermCLI", ACC);
     draw_small(c, 10 + 11 * DM_SMALL_W, 6, help_open ? "help open" : "on EXT display", DIMC);
     for (int x = 0; x < c->w; x++) c->px[26 * c->w + x] = LINE;
 
-    draw_big(c, 10, 36, hm, FG);
+    draw_clock(c, 10, 36, hm, ampm, FG);
     draw_small(c, 12, 82, date, DIMC);
 
     const char *lab[4] = {"BAT", "IP", "RAM", "CPU"};
@@ -336,10 +353,9 @@ int main(void)
 
     /* Shell in the shared tmux session; we only send keys, the EXT display shows it */
     char font[8];
-    conf_get("FONT", font, sizeof font, "6x12");
-    struct winsize ws = {.ws_row = 20, .ws_col = 53};
-    if (!strcmp(font, "8x16")) { ws.ws_row = 15; ws.ws_col = 40; }
-    if (!strcmp(font, "8x8")) { ws.ws_row = 30; ws.ws_col = 40; }
+    conf_get("FONT", font, sizeof font, "t12");
+    const font_t *fo = font_find(font);
+    struct winsize ws = {.ws_row = fo->rows, .ws_col = fo->cols};
     int pty;
     pid_t child = forkpty(&pty, NULL, NULL, &ws);
     if (child < 0) { perror("forkpty"); return 1; }
@@ -465,11 +481,11 @@ int main(void)
             if (sb_up) { tmux_cmd("copy-mode", "-e", "-u", "-tdm"); scrolled = 1; continue; }
             if (sb_dn) { if (scrolled) tmux_cmd("send-keys", "-tdm", "-X", "page-down"); continue; }
 
-            /* F6 (fn+6): the CLI's viewport toggle -> cycle the text size */
+            /* F6 (fn+6): the CLI's viewport toggle -> the next font */
             if (ev.value == 1 && (code == KEY_F6 || (fn && code == KEY_6))) {
                 char cur[8];
-                conf_get("FONT", cur, sizeof cur, "6x12");
-                const char *next = !strcmp(cur, "6x12") ? "8x8" : !strcmp(cur, "8x8") ? "8x16" : "6x12";
+                conf_get("FONT", cur, sizeof cur, "t12");
+                const char *next = FONTS[(font_find(cur) - FONTS + 1) % NFONTS].name;
                 char *argv[] = {"sudo", "-n", CTL, "set", "FONT", (char *)next, NULL};
                 spawn(argv, 1);
                 continue;

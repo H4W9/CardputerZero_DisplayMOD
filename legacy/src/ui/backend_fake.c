@@ -6,8 +6,8 @@
 #include "backend.h"
 
 static dm_pair_t g_set[] = {
-    {"MODE", "mirror"}, {"BIGTERM", "1"}, {"MIRROR_LAYOUT", "bar"}, {"DIM_BUILTIN", "1"}, {"DETECT", "1"}, {"BRIGHTNESS", "sync"}, {"BORDER_COLOR", "black"}, {"ALIGN", "center"}, {"BUILTIN_OFF", "0"}, {"SLEEP", "5"}, {"HISTORY", "1"}, {"HIST_SIZE", "1000"}, {"HIST_DUPS", "1"},
-    {"ROTATE", "90"}, {"FONT", "6x12"}, {"SPEED", "16000000"}, {"BGR", "0"},
+    {"MODE", "mirror"}, {"BIGTERM", "1"}, {"MIRROR_LAYOUT", "bar"}, {"DIM_BUILTIN", "1"}, {"DETECT", "1"}, {"BRIGHTNESS", "sync"}, {"BORDER_COLOR", "black"}, {"ALIGN", "center"}, {"BUILTIN_OFF", "0"}, {"SLEEP", "5"}, {"CLOCK", "24"}, {"HISTORY", "1"}, {"HIST_SIZE", "1000"}, {"HIST_DUPS", "1"},
+    {"ROTATE", "90"}, {"FONT", "t12"}, {"SPEED", "16000000"}, {"BGR", "0"},
     {"TTY", "auto"}, {"DC", "23"}, {"RST", "22"}, {"LED", "26"},
 };
 static int g_busy;

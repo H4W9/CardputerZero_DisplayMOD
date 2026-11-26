@@ -61,8 +61,8 @@ def version():
 
 
 def build():
-    shutil.rmtree(BUILD, ignore_errors=True)
-    os.makedirs(BUILD)
+    shutil.rmtree(BUILD, ignore_errors=True)   # OneDrive may hold a file: rebuild over what's left
+    os.makedirs(BUILD, exist_ok=True)
     os.environ["ZIG_GLOBAL_CACHE_DIR"] = os.environ["ZIG_LOCAL_CACHE_DIR"] = os.path.join(BUILD, "zig-cache")
     lvgl = os.path.join(UI, "lvgl", "src")
     if not os.path.isdir(lvgl):

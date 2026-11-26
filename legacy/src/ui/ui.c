@@ -79,7 +79,7 @@ static int g_np;
 /* Read live by the mirror / BigTermCLI: no restart, applied at once */
 static int is_live(const char *k)
 {
-    static const char *const L[] = {"BRIGHTNESS", "BORDER_COLOR", "BUILTIN_OFF", "SLEEP", "DIM_BUILTIN",
+    static const char *const L[] = {"BRIGHTNESS", "BORDER_COLOR", "BUILTIN_OFF", "SLEEP", "CLOCK", "DIM_BUILTIN",
                                      "BIGTERM", "HISTORY", "HIST_SIZE", "HIST_DUPS", NULL};
     for (int i = 0; L[i]; i++) if (!strcmp(L[i], k)) return 1;
     return 0;
@@ -120,14 +120,21 @@ static const char *const HSIZE_V[] = {"100", "500", "1000", "5000", NULL};
 static const char *const HSIZE_N[] = {"100", "500", "1000", "5000", NULL};
 static const char *const SLEEP_V[] = {"1", "2", "5", "10", "30", "0", NULL};
 static const char *const SLEEP_N[] = {"1 min", "2 min", "5 min", "10 min", "30 min", "Never", NULL};
+static const char *const CLOCK_V[] = {"24", "12", NULL};
+static const char *const CLOCK_N[] = {"24-hour", "12-hour", NULL};
 static const char *const ALIGN_V[] = {"top", "center", "bottom", NULL};
 static const char *const ALIGN_N[] = {"Top", "Center", "Bottom", NULL};
 static const char *const BORDER_V[] = {"black", "charcoal", "slate", "navy", "teal", "green", "maroon", "purple", "white", NULL};
 static const char *const BORDER_N[] = {"Black", "Charcoal", "Slate", "Navy", "Teal", "Green", "Maroon", "Purple", "White", NULL};
 static const char *const ROT_V[] = {"90", "270", "0", "180", NULL};
 static const char *const ROT_N[] = {"90\xC2\xB0 wide", "270\xC2\xB0 wide", "0\xC2\xB0 tall", "180\xC2\xB0 tall", NULL};
-static const char *const FONT_V[] = {"6x12", "8x8", "8x16", NULL};      /* same order as F6 in BigTermCLI */
-static const char *const FONT_N[] = {"6x12 \xE2\x80\xA2 53x20", "8x8 \xE2\x80\xA2 40x30", "8x16 \xE2\x80\xA2 40x15", NULL};
+/* same order as F6 in BigTermCLI: Terminus (the CardputerZero OS terminal
+ * font), then the console's VGA fonts */
+static const char *const FONT_V[] = {"t12", "t14", "t16", "t18", "t20", "v8", "v16", NULL};
+static const char *const FONT_N[] = {"Terminus 12 \xE2\x80\xA2 53x20", "Terminus 14 \xE2\x80\xA2 40x17",
+                                     "Terminus 16 \xE2\x80\xA2 40x15", "Terminus 18 \xE2\x80\xA2 32x13",
+                                     "Terminus 20 \xE2\x80\xA2 32x12", "VGA 8x8 \xE2\x80\xA2 40x30",
+                                     "VGA 8x16 \xE2\x80\xA2 40x15", NULL};
 static const char *const BRIGHT_V[] = {"sync", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100", NULL};
 static const char *const BRIGHT_N[] = {"Match built-in", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", NULL};
 static const char *const SPEED_V[] = {"8000000", "16000000", "24000000", "32000000", NULL};
@@ -153,6 +160,7 @@ static const item_t HOME[] = {
 static const item_t SCREEN[] = {
     {K_PICK, "Brightness", "BRIGHTNESS", BRIGHT_V, BRIGHT_N, NULL, NULL, 0},
     {K_PICK, "Sleep (built-in off)", "SLEEP", SLEEP_V, SLEEP_N, NULL, NULL, 0},
+    {K_PICK, "Clock", "CLOCK", CLOCK_V, CLOCK_N, NULL, NULL, 0},   /* status bar and BigTermCLI */
     {K_PICK, "Rotation", "ROTATE", ROT_V, ROT_N, NULL, NULL, 0},
     {K_PICK, "BigTermCLI font", "FONT", FONT_V, FONT_N, NULL, NULL, 0},
     {K_PICK, "SPI speed", "SPEED", SPEED_V, SPEED_N, NULL, NULL, 0},
@@ -615,7 +623,7 @@ static void build_view(enum page pg, int chip, const dm_pair_t *st, int stn)
     }
     switch (pg) {
     case P_HOME:    lv_label_set_text(g_title, "DisplayMOD"); items = HOME; n = 12; break;
-    case P_SCREEN:  lv_label_set_text(g_title, "EXT display"); items = SCREEN; n = 8; break;
+    case P_SCREEN:  lv_label_set_text(g_title, "EXT display"); items = SCREEN; n = 9; break;
     case P_CONFIRM: lv_label_set_text(g_title, "Uninstall"); items = CONFIRM; n = 4; break;
     case P_STATUS:  lv_label_set_text(g_title, "Status"); status_rows(st, stn); break;
     case P_WIRING:  lv_label_set_text(g_title, "Wiring help"); wiring_rows(); break;

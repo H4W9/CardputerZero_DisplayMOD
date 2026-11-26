@@ -66,6 +66,7 @@ static int g_bright = -1;          /* -1 = match built-in, else 10..100 % */
 static uint16_t g_border;          /* RGB565 fill around the 1:1 copy */
 static int g_builtin_off = 0;      /* keep the built-in backlight off */
 static int g_sleep_min = 5;        /* idle minutes before the EXT display sleeps (0 = never) */
+static int g_clock12 = 0;          /* CLOCK=12: 12-hour time in the status bar */
 static int g_align = 1;            /* 1:1 copy position: 0 top, 1 center, 2 bottom */
 
 static void on_signal(int s) { (void)s; g_stop = 1; }
@@ -98,6 +99,8 @@ static void load_conf(void)
             g_builtin_off = line[12] == '1';
         } else if (!strncmp(line, "SLEEP=", 6)) {
             g_sleep_min = atoi(line + 6);
+        } else if (!strncmp(line, "CLOCK=", 6)) {
+            g_clock12 = atoi(line + 6) == 12;
         } else if (!strncmp(line, "ALIGN=", 6)) {
             g_align = !strncmp(line + 6, "top", 3) ? 0 : !strncmp(line + 6, "bottom", 6) ? 2 : 1;
         } else if (!strncmp(line, "BORDER_COLOR=", 13)) {
@@ -200,12 +203,11 @@ static void render_bar(canvas_t *c, int info_tick)
     for (int i = 0; i < c->w * c->h; i++) c->px[i] = BG;
     for (int x = 0; x < c->w; x++) c->px[x] = LINE;
 
-    char hm[8], date[24];
-    const char *fake = getenv("DM_FAKE_TIME");
+    char hm[12], ampm[4], date[24];
     time_t t = time(NULL);
     struct tm tm;
     localtime_r(&t, &tm);
-    if (fake) snprintf(hm, sizeof hm, "%s", fake); else strftime(hm, sizeof hm, "%H:%M", &tm);
+    clock_text(hm, sizeof hm, ampm, sizeof ampm, g_clock12);
     strftime(date, sizeof date, "%a %d %b", &tm);
 
     const char *lab[4] = {"BAT", "IP", "RAM", "CPU"};
@@ -214,7 +216,7 @@ static void render_bar(canvas_t *c, int info_tick)
     if (c->w >= 300) {               /* side by side: clock left, info right */
         int y0 = (c->h - 64) / 2;
         if (y0 < 2) y0 = 2;
-        draw_big(c, 8, y0 - 2, hm, FG);
+        draw_clock(c, 8, y0 - 2, hm, ampm, FG);
         draw_small(c, 10, y0 + 46, date, DIMC);
         int x0 = c->w - 8 - 18 * DM_SMALL_W;
         for (int i = 0; i < 4; i++) {
@@ -224,7 +226,7 @@ static void render_bar(canvas_t *c, int info_tick)
         }
     } else {                         /* narrow (portrait): stacked */
         int y = 6;
-        draw_big(c, 8, y, hm, FG);
+        draw_clock(c, 8, y, hm, ampm, FG);
         draw_small(c, 10, y + 44, date, DIMC);
         for (int i = 0; i < 4; i++) {
             int yy = y + 66 + i * DM_SMALL_H;

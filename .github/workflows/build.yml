@@ -76,6 +76,17 @@ jobs:
             esac
           done
 
+      - name: Check the generated overlays compile
+        run: |
+          sudo apt-get install -y -qq device-tree-compiler >/dev/null
+          ctl=pkg/usr/lib/displaymod/displaymod-ctl
+          { for f in pwm_dts panel_dts; do sed -n "/^$f()/,/^DTS\$/p" "$ctl"; echo "}"; done; } > overlays.sh
+          . ./overlays.sh
+          SPEED=16000000; ROTATE=90; DC=23; RST=22; BGR=0
+          pwm_dts 26 | dtc -I dts -O dtb -o /dev/null - && echo "pwm-gpio overlay ok"
+          panel_dts "" | dtc -I dts -O dtb -o /dev/null - && echo "panel overlay ok"
+          panel_dts 26 | dtc -I dts -O dtb -o /dev/null - && echo "panel overlay (led) ok"
+
       - name: Build .deb (store edition)
         id: deb
         run: |
@@ -125,7 +136,8 @@ jobs:
             ./usr/bin/displaymod ./usr/bin/displaymod-ui ./usr/bin/displaymod-term \
             ./usr/lib/displaymod/displaymod-ctl ./usr/lib/displaymod/displaymod-mirror \
             ./usr/lib/displaymod/displaymod-probe ./usr/lib/displaymod/displaymod-daemon \
-            ./usr/lib/displaymod/displaymod-send
+            ./usr/lib/displaymod/displaymod-send \
+            ./usr/share/displaymod/fonts/ter-u12n.psf.gz
           check_deb "legacy/dist/${{ steps.legacy_deb.outputs.name }}" \
             ./usr/share/APPLaunch/applications/displaymod.desktop \
             ./usr/share/APPLaunch/share/images/displaymod_100.png \
@@ -133,7 +145,8 @@ jobs:
             ./usr/lib/systemd/system/displaymod.service \
             ./usr/bin/displaymod ./usr/bin/displaymod-ui ./usr/bin/displaymod-term \
             ./usr/lib/displaymod/displaymod-ctl ./usr/lib/displaymod/displaymod-mirror \
-            ./usr/lib/displaymod/displaymod-probe
+            ./usr/lib/displaymod/displaymod-probe \
+            ./usr/share/displaymod/fonts/ter-u12n.psf.gz
 
       - uses: actions/upload-artifact@v4
         with:

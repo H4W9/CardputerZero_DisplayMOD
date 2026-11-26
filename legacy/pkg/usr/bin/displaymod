@@ -9,7 +9,7 @@ CTL=(sudo -n /usr/lib/displaymod/displaymod-ctl)
 HIST="$HOME/.local/share/displaymod/bigterm_history"
 
 declare -A PEND
-LIVE=" BRIGHTNESS BORDER_COLOR BUILTIN_OFF SLEEP DIM_BUILTIN BIGTERM HISTORY HIST_SIZE HIST_DUPS "
+LIVE=" BRIGHTNESS BORDER_COLOR BUILTIN_OFF SLEEP CLOCK DIM_BUILTIN BIGTERM HISTORY HIST_SIZE HIST_DUPS "
 
 cls() { printf '\033[H\033[2J'; }
 key() { IFS= read -rsn1 k || k=q; printf '%s' "$k"; }   # end of input = quit
@@ -103,28 +103,37 @@ menu_builtin() {
   done
 }
 
+font_name() { # BigTermCLI font, as the app names it
+  case "$1" in
+    t*)  echo "Terminus ${1#t}" ;;
+    v*)  echo "VGA 8x${1#v}" ;;
+  esac
+}
+
 menu_screen() {
   while :; do
     br=$(val BRIGHTNESS); r=$(val ROTATE); f=$(val FONT); s=$(val SPEED)
-    g=$(val BGR); dt=$(val DETECT)
+    g=$(val BGR); dt=$(val DETECT); ck=$(val CLOCK)
     if [ "$br" = sync ]; then brn="match built-in"; else brn="$br%"; fi
     cls
     echo " EXT display ($(screen_state))$(pnote)"
     echo " [1] Brightness  $brn"
-    echo " [2] Rotation $r$(mark ROTATE)   [3] Font $f$(mark FONT)"
+    echo " [2] Rotation $r$(mark ROTATE)   [3] Font $(font_name "$f")$(mark FONT)"
     echo " [4] SPI $((s / 1000000)) MHz$(mark SPEED)   [5] Swap R/B $(yn "$g")$(mark BGR)"
     echo " [6] Start only if detected  $(yn "$dt")$(mark DETECT)"
     echo " [7] Check for screen again"
+    echo " [8] Clock ${ck}-hour (status bar, BigTermCLI)"
     echo "     Pins DC/RST/LED $(val DC)/$(val RST)/$(val LED) (fixed)"
     echo " [b] Back"
     case $(key) in
       1) chg BRIGHTNESS "$(cycle "$br" sync 10 20 30 40 50 60 70 80 90 100)" ;;
       2) chg ROTATE "$(cycle "$r" 90 270 0 180)" ;;
-      3) chg FONT "$(cycle "$f" 6x12 8x8 8x16)" ;;
+      3) chg FONT "$(cycle "$f" t12 t14 t16 t18 t20 v8 v16)" ;;
       4) chg SPEED "$(cycle "$s" 8000000 16000000 24000000 32000000)" ;;
       5) chg BGR "$(cycle "$g" 0 1)" ;;
       6) chg DETECT "$(cycle "$dt" 0 1)" ;;
       7) run apply ;;
+      8) chg CLOCK "$(cycle "$ck" 24 12)" ;;
       p) apply_pending ;;
       b|q) return ;;
     esac

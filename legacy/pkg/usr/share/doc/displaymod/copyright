@@ -19,3 +19,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Files: usr/share/displaymod/fonts/vga8x8.psf.gz usr/share/displaymod/fonts/vga8x16.psf.gz
+Copyright: the Linux kernel authors
+License: GPL-2.0
+ The Linux console's VGA fonts (lib/fonts/font_8x8.c and font_8x16.c),
+ unchanged, in PSF format. On Debian systems the GPL is in
+ /usr/share/common-licenses/GPL-2.
+
+Files: usr/share/displaymod/fonts/ter-u*n.psf.gz
+Copyright: 2020 Dimitar Toshkov Zhekov
+License: OFL-1.1
+ Terminus Font, converted from its BDF files to the console's PSF format with
+ tools/make_fonts.py; the glyphs are unchanged. The full license is in
+ /usr/share/displaymod/fonts/Terminus-OFL.txt.

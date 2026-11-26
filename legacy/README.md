@@ -10,6 +10,7 @@ Second screen for the M5Stack CardputerZero. DisplayMOD drives a 2.8" ILI9341 SP
 ## Features
 
 - 1:1 mirror of the built-in screen, with a status bar (clock, battery, IP, RAM, CPU) in the spare rows
+- 12- or 24-hour clock in the status bar and on BigTermCLI's built-in screen page
 - Layouts: status bar, stretch, or no bar with top/center/bottom position and a border color
 - BigTermCLI: terminal on the EXT display with the same keys and colors as the CLI app, starting in your home folder
 - Command history in BigTermCLI, saved after every command and kept across reboots
@@ -41,7 +42,7 @@ Leave the touch (T_*) and SD pins unconnected and don't use pin 2 (5V in). Power
 Copy the `.deb` to the CardputerZero, then:
 
 ```
-sudo apt install ./displaymod_2.8.7_arm64.deb
+sudo apt install ./displaymod_2.9.0_arm64.deb
 sudo reboot
 ```
 
@@ -64,9 +65,11 @@ Quick settings (brightness, border color, sleep, built-in screen, history) apply
 | fn+K / N | line start / end |
 | shift+fn+L / M | scroll back / forward |
 | fn+1 … 0 | F1 … F10 |
-| F6 (fn+6) | change text size |
+| F6 (fn+6) | next font |
 | fn+H | help |
 | hold Esc | quit |
+
+BigTermCLI uses Terminus 12 by default, the CardputerZero OS terminal font: a bitmap face, so text stays sharp. Terminus also comes at 14, 16, 18 and 20, and the console's VGA 8x8 and 8x16 fonts are there too. Choose the font in the app under EXT display settings, in the `displaymod` menu, or with F6 in BigTermCLI.
 
 `exit` ends the session; ctrl+B then D leaves it running for next time.
 

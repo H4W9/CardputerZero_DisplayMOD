@@ -151,7 +151,7 @@ def _targz(root, mtime, only=None):
                     continue
                 with open(os.path.join(base, f), "rb") as fh:
                     data = fh.read()
-                binary = data.startswith(b"\x7fELF") or f.endswith(".png")
+                binary = data.startswith(b"\x7fELF") or f.endswith((".png", ".gz"))
                 if not binary:
                     data = data.replace(b"\r\n", b"\n")
                 exe = data.startswith((b"\x7fELF", b"#!")) or (only and rel != "control")
