@@ -140,11 +140,11 @@ static uint32_t map_key(int code)
     }
 }
 
-/* Holding an arrow key repeats it with the launcher's timing: after REP_DELAY ms,
- * every REP_RATE ms. The keyboard driver sends no repeats of its own, so
+/* Holding an arrow key repeats it with the launcher's timing: after KBD_REP_DELAY ms,
+ * every KBD_REP_RATE ms. The keyboard driver sends no repeats of its own, so
  * each repeat is a fresh press (the next read reports the release). */
-#define REP_DELAY 500
-#define REP_RATE 50
+#define KBD_REP_DELAY 500
+#define KBD_REP_RATE 50
 
 static int repeats(uint32_t k)
 {
@@ -165,7 +165,7 @@ static void kbd_read(lv_indev_t *indev, lv_indev_data_t *data)
         if (g_error && k == LV_KEY_ESC) g_exit = 1;
         if (ev.value) {
             held_key = repeats(k) ? k : 0;
-            next_rep = tick_ms() + REP_DELAY;
+            next_rep = tick_ms() + KBD_REP_DELAY;
         } else if (k == held_key) held_key = 0;
         last_key = k;
         data->key = k;
@@ -176,7 +176,7 @@ static void kbd_read(lv_indev_t *indev, lv_indev_data_t *data)
     static int rep_down;                 /* a repeat press was just reported */
     if (rep_down) { rep_down = 0; return; }   /* its release */
     if (held_key && (int32_t)(tick_ms() - next_rep) >= 0) {
-        next_rep = tick_ms() + REP_RATE;
+        next_rep = tick_ms() + KBD_REP_RATE;
         last_key = held_key;
         data->key = held_key;
         data->state = LV_INDEV_STATE_PRESSED;

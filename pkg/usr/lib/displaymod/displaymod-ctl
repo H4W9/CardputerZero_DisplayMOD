@@ -13,6 +13,7 @@
 #   displaymod-ctl panel-state    prints up, missing or down
 #   displaymod-ctl status         short status, KEY|VALUE lines
 #   displaymod-ctl boot|shutdown  used by displaymod-daemon
+#   displaymod-ctl retry          used by displaymod-daemon: look for a late EXT display
 
 set -u
 CONF=/etc/displaymod/displaymod.conf
@@ -223,6 +224,17 @@ ov_remove() { # name (also an overlay a 2.x dtoverlay left behind)
 }
 
 # ---------- panel ----------
+# At boot the header 5V switch (IO expander), spi0.1 and the built-in screen
+# can show up after this runs: on systems without a boot splash it starts
+# within seconds of power on. Wait for them, at most 15 s.
+wait_hw() {
+  i=0
+  while [ $i -lt 75 ]; do
+    [ -e "$V5" ] && [ -e /sys/bus/spi/devices/spi0.1 ] && [ -e "/dev/fb$(builtin_fb)" ] && return 0
+    sleep 0.2; i=$((i + 1))
+  done
+  echo "Note: header 5V, spi0.1 or the built-in screen still missing after 15 s"
+}
 panel_up() {
   [ -n "$(panel_fb)" ] && return 0
   echo 1 > "$V5" 2>/dev/null || echo "Note: could not switch on header 5V"
@@ -471,7 +483,12 @@ case "$cmd" in
   status) status ;;
   boot)
     bigterm_entry
-    [ "$MODE" = off ] || apply ;;
+    [ "$MODE" = off ] && exit 0
+    wait_hw
+    apply ;;
+  retry)
+    [ "$MODE" != off ] && [ -f "$RUN/notfound" ] && [ -z "$(panel_fb)" ] || exit 0
+    apply ;;
   shutdown) mode_off text ;;
   *) sed -n '2,15p' "$0"; exit 2 ;;
 esac

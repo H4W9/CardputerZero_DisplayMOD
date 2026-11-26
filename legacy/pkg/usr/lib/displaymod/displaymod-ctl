@@ -130,6 +130,17 @@ bigterm_entry() { # show the BigTermCLI launcher entry only when enabled
 }
 
 # ---------- panel ----------
+# At boot the header 5V switch (IO expander), spi0.1 and the built-in screen
+# can show up after this runs: on systems without a boot splash it starts
+# within seconds of power on. Wait for them, at most 15 s.
+wait_hw() {
+  i=0
+  while [ $i -lt 75 ]; do
+    [ -e "$V5" ] && [ -e /sys/bus/spi/devices/spi0.1 ] && [ -e "/dev/fb$(builtin_fb)" ] && return 0
+    sleep 0.2; i=$((i + 1))
+  done
+  echo "Note: header 5V, spi0.1 or the built-in screen still missing after 15 s"
+}
 panel_up() {
   [ -n "$(panel_fb)" ] && return 0
   echo 1 > "$V5" 2>/dev/null || echo "Note: could not switch on header 5V"
@@ -376,7 +387,15 @@ case "$cmd" in
   boot)
     mkdir -p "$RUN"
     bigterm_entry
-    [ "$MODE" = off ] || apply ;;
+    [ "$MODE" = off ] && exit 0
+    wait_hw
+    apply
+    # Not found: look again for a while, the panel's power can come up late
+    for d in 3 5 10 15; do
+      [ -f "$RUN/notfound" ] || break
+      sleep $d
+      apply
+    done ;;
   shutdown) mode_off text ;;
   uninstall)
     mode_off text

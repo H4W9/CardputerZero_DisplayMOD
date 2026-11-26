@@ -306,6 +306,13 @@ int main(void)
     g_mirror_started = 0;
     reconcile();
 
+    /* EXT display not found at boot: look again during the first minute, in
+     * case its power or SPI bus came up late. Stops once it is found. */
+    static const int retry_at[] = {3, 6, 10, 15, 20, 30, 45, 60};
+    const int nretry = sizeof retry_at / sizeof retry_at[0];
+    time_t boot_t = time(NULL);
+    int ri = 0;
+
     int s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     struct sockaddr_un a = {.sun_family = AF_UNIX};
     snprintf(a.sun_path, sizeof a.sun_path, "%s", SOCK);
@@ -326,6 +333,14 @@ int main(void)
         bigterm_check();
         ui_check();
         reconcile();
+        if (ri < nretry && time(NULL) - boot_t >= retry_at[ri]) {
+            ri++;
+            if (access(RUN "/notfound", F_OK) == 0) {
+                char *retry[] = {"retry", NULL};
+                run_ctl(retry, 2);
+                reconcile();
+            } else ri = nretry;         /* found, or mirroring is off */
+        }
     }
 
     bigterm_off();
