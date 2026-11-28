@@ -140,8 +140,46 @@ menu_screen() {
   done
 }
 
-hist_count() {
-  if [ -s "$HIST" ]; then wc -l < "$HIST" | tr -d ' '; else echo 0; fi
+# Saved commands, oldest first. Bash writes "#<seconds>" lines before
+# commands when HISTTIMEFORMAT is set; those are not commands.
+hist_cmds() { [ -f "$HIST" ] && grep -nv '^#[0-9][0-9]*$' "$HIST"; }
+hist_count() { hist_cmds | wc -l | tr -d ' '; }
+
+# Delete the command on line $1 of the file (and its time line, if any)
+hist_del() {
+  local from=$1
+  [ "$1" -gt 1 ] && sed -n "$(($1 - 1))p" "$HIST" | grep -q '^#[0-9][0-9]*$' && from=$(($1 - 1))
+  sed "${from},${1}d" "$HIST" > "$HIST.new" && mv "$HIST.new" "$HIST" && : > "$HIST.reload"
+}
+
+# Newest first, 9 per page: a number deletes, n/v older/newer
+menu_hist_view() {
+  local top=0
+  while :; do
+    mapfile -t L < <(hist_cmds | tac)
+    local n=${#L[@]}
+    [ "$top" -ge "$n" ] && top=$(( n > 9 ? (n - 1) / 9 * 9 : 0 ))
+    cls
+    echo " Saved commands: $n (newest first)"
+    [ "$n" = 0 ] && echo "   (none)"
+    for i in 0 1 2 3 4 5 6 7 8; do
+      [ $((top + i)) -lt "$n" ] || break
+      printf ' [%d] %.34s\n' $((i + 1)) "${L[top + i]#*:}"
+    done
+    [ $((top + 9)) -lt "$n" ] && o=" [n] older" || o=""
+    [ "$top" -gt 0 ] && w=" [v] newer" || w=""
+    echo "$o$w  [b] back   number: delete"
+    k=$(key)
+    case $k in
+      [1-9])
+        e=${L[top + k - 1]}; [ -n "$e" ] || continue
+        cls; echo " Delete this saved command?"; echo " ${e#*:}" | fold -w 38; echo " [y/n]"
+        [ "$(key)" = y ] && hist_del "${e%%:*}" ;;
+      n) [ $((top + 9)) -lt "$n" ] && top=$((top + 9)) ;;
+      v) [ "$top" -gt 0 ] && top=$((top - 9)) ;;
+      b|q) return ;;
+    esac
+  done
 }
 
 menu_history() {
@@ -153,13 +191,15 @@ menu_history() {
     echo " [1] Save command history  $(yn "$h")"
     echo " [2] Keep last             $hs"
     echo " [3] Skip repeated         $(yn "$hd")"
-    echo " [4] Clear history"
+    echo " [4] View & delete commands"
+    echo " [5] Clear history"
     echo " [b] Back"
     case $(key) in
       1) chg HISTORY "$(cycle "$h" 0 1)" ;;
       2) chg HIST_SIZE "$(cycle "$hs" 100 500 1000 5000)" ;;
       3) chg HIST_DUPS "$(cycle "$hd" 0 1)" ;;
-      4) cls; echo " Clear all saved BigTermCLI history? [y/n]"
+      4) menu_hist_view ;;
+      5) cls; echo " Delete all $(hist_count) saved commands? This can't be undone. [y/n]"
          if [ "$(key)" = y ]; then
            mkdir -p "${HIST%/*}"; : > "$HIST"; : > "$HIST.clear"   # open shell clears at next prompt
          fi ;;

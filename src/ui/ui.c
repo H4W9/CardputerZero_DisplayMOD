@@ -31,12 +31,13 @@
 #define C_RED_BG  0x5A2828
 #define C_RED_FG  0xFFBEB4
 
-enum page { P_HOME, P_SCREEN, P_STATUS, P_CONFIRM, P_DONE, P_WIRING, P_ABOUT, P_HISTORY, P_LEAVE };
+enum page { P_HOME, P_SCREEN, P_STATUS, P_CONFIRM, P_DONE, P_WIRING, P_ABOUT, P_HISTORY, P_LEAVE,
+            P_HIST_LIST, P_HIST_ITEM, P_HIST_CLEAR };
 
 #ifndef DM_VERSION
 #define DM_VERSION "dev"
 #endif
-enum kind { K_TOGGLE, K_PICK, K_LINK, K_INFO, K_BUTTON };
+enum kind { K_TOGGLE, K_PICK, K_LINK, K_INFO, K_BUTTON, K_ENTRY };   /* K_ENTRY: a saved command */
 
 typedef struct {
     enum kind kind;
@@ -141,7 +142,11 @@ static const char *const SPEED_V[] = {"8000000", "16000000", "24000000", "320000
 static const char *const SPEED_N[] = {"8 MHz", "16 MHz", "24 MHz", "32 MHz", NULL};
 
 enum { ACT_UNINSTALL = 1, ACT_CANCEL = 2, ACT_EXIT = 3, ACT_RECHECK = 4, ACT_CLEAR_HIST = 5,
-       ACT_APPLY = 6, ACT_APPLY_EXIT = 7 };
+       ACT_APPLY = 6, ACT_APPLY_EXIT = 7, ACT_HIST_DEL = 8, ACT_HIST_MORE = 9 };
+
+/* History list: shown in pages of HIST_PAGE, newest first */
+#define HIST_PAGE 100
+static int g_hist_show = HIST_PAGE, g_hist_sel;
 
 static const item_t HOME[] = {
     {K_TOGGLE, "Mirror to EXT display", "MODE", NULL, NULL, "mirror", "off", 0},
@@ -172,7 +177,8 @@ static const item_t HISTORY[] = {
     {K_TOGGLE, "Save command history", "HISTORY", NULL, NULL, "1", "0", 0},
     {K_PICK, "Keep last", "HIST_SIZE", HSIZE_V, HSIZE_N, NULL, NULL, 0},
     {K_TOGGLE, "Skip repeated commands", "HIST_DUPS", NULL, NULL, "1", "0", 0},
-    {K_BUTTON, "Clear history", NULL, NULL, NULL, NULL, NULL, ACT_CLEAR_HIST},
+    {K_LINK, "View & delete commands", NULL, NULL, NULL, NULL, NULL, P_HIST_LIST},
+    {K_LINK, "Clear history...", NULL, NULL, NULL, NULL, NULL, P_HIST_CLEAR},
 };
 static const item_t CONFIRM[] = {
     {K_INFO, "To remove DisplayMOD, run over", NULL, NULL, NULL, NULL, NULL, 0},
@@ -402,9 +408,27 @@ static void row_focused(lv_event_t *e)
 
 static void go(enum page p)
 {
+    if (p == P_HIST_LIST && g_page == P_HIST_ITEM) {       /* back to the same row */
+        g_page = p;
+        g_focus_idx = g_hist_sel;
+        lv_async_call(rebuild_async, NULL);
+        return;
+    }
+    if (p == P_HIST_LIST && g_page == P_HISTORY) g_hist_show = HIST_PAGE;
     g_page = p;
     g_focus_idx = 0;
     lv_async_call(rebuild_async, NULL);
+}
+
+/* Where Esc goes from each page */
+static enum page parent(enum page p)
+{
+    switch (p) {
+    case P_CONFIRM: return P_STATUS;
+    case P_HIST_LIST: case P_HIST_CLEAR: return P_HISTORY;
+    case P_HIST_ITEM: return P_HIST_LIST;
+    default: return P_HOME;
+    }
 }
 
 static void row_key(lv_event_t *e)
@@ -420,7 +444,7 @@ static void row_key(lv_event_t *e)
         lv_group_focus_next(g_group); return;
     case LV_KEY_ESC: case LV_KEY_BACKSPACE:
         if (g_page == P_HOME) { if (g_np) go(P_LEAVE); else ui_request_exit(); return; }
-        go(g_page == P_CONFIRM ? P_STATUS : P_HOME);
+        go(parent(g_page));
         return;
     case 'a': case 'A':
         apply_pending(0);
@@ -451,12 +475,23 @@ static void row_key(lv_event_t *e)
     case K_LINK:
         if (enter || right) go(it->target);
         break;
+    case K_ENTRY:
+        if (enter || right) { g_hist_sel = g_focus_idx; go(P_HIST_ITEM); }
+        break;
     case K_BUTTON:
         if (!enter) break;
         if (it->target == ACT_EXIT) ui_request_exit();
         else if (it->target == ACT_APPLY) apply_pending(0);
         else if (it->target == ACT_APPLY_EXIT) apply_pending(1);
-        else if (it->target == ACT_CLEAR_HIST) { dm_history_clear(); lv_async_call(rebuild_async, NULL); }
+        else if (it->target == ACT_CLEAR_HIST) { dm_history_clear(); go(P_HISTORY); }
+        else if (it->target == ACT_HIST_DEL) {
+            dm_history_delete(g_hist_sel);
+            go(P_HIST_LIST);                               /* focus stays on the next one */
+        } else if (it->target == ACT_HIST_MORE) {
+            g_focus_idx = g_hist_show;                     /* first of the older ones */
+            g_hist_show += HIST_PAGE;
+            lv_async_call(rebuild_async, NULL);
+        }
         else if (it->target == ACT_RECHECK && !g_busy && dm_apply_async() == 0)
             show_busy("Looking for the EXT display...");
         else if (it->target == ACT_CANCEL) go(P_STATUS);
@@ -509,9 +544,13 @@ static lv_obj_t *make_row(const item_t *it, int idx, int focusable)
         snprintf(buf, sizeof buf, "%s / %s / %s", dm_get("DC"), dm_get("RST"), dm_get("LED"));
         lv_obj_t *v = text(row, buf, &lv_font_montserrat_12, C_DIM);
         lv_obj_align(v, LV_ALIGN_RIGHT_MID, 0, 0);
+    } else if (it->kind == K_ENTRY) {
+        lv_obj_set_width(l, LV_PCT(100));
+        lv_obj_set_height(l, 15);                            /* one line, "..." if longer */
+        lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
     } else if (it->kind == K_BUTTON) {
         lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
-        if (it->target == ACT_UNINSTALL) {
+        if (it->target == ACT_UNINSTALL || it->target == ACT_CLEAR_HIST || it->target == ACT_HIST_DEL) {
             lv_obj_set_style_bg_color(row, lv_color_hex(C_RED_BG), 0);
             lv_obj_set_style_bg_color(row, lv_color_hex(0x8A3030), LV_STATE_FOCUSED);
             lv_obj_set_style_text_color(l, lv_color_hex(C_RED_FG), 0);
@@ -647,7 +686,66 @@ static void build_view(enum page pg, int chip, const dm_pair_t *st, int stn)
         static item_t info = {K_INFO, "", NULL, NULL, NULL, NULL, NULL, 0};
         info.label = cnt;
         make_row(&info, 0, 0);
-        items = HISTORY; n = 4;
+        items = HISTORY; n = 5;
+        break;
+    }
+    case P_HIST_LIST: {
+        int total = dm_history_load(), shown_n = total < g_hist_show ? total : g_hist_show;
+        static char ttl[40];
+        snprintf(ttl, sizeof ttl, "Saved commands (%d)", total);
+        lv_label_set_text(g_title, ttl);
+        lv_label_set_text(g_hint, LV_SYMBOL_UP LV_SYMBOL_DOWN " move   ENTER delete...   ESC back");
+        static item_t e = {K_ENTRY, "", NULL, NULL, NULL, NULL, NULL, 0};
+        for (int i = 0; i < shown_n; i++) {
+            lv_obj_t *r = make_row(&e, fi++, 1);
+            lv_label_set_text(lv_obj_get_child(r, 0), dm_history_item(i));
+        }
+        if (!total) {
+            static const item_t none = {K_INFO, "No saved commands.", NULL, NULL, NULL, NULL, NULL, 0};
+            make_row(&none, 0, 0);
+        }
+        if (total > shown_n) {
+            static char more[40];
+            snprintf(more, sizeof more, "Show older (%d more)", total - shown_n);
+            static item_t m = {K_BUTTON, "", NULL, NULL, NULL, NULL, NULL, ACT_HIST_MORE};
+            m.label = more;
+            make_row(&m, fi++, 1);
+        }
+        static const item_t b = {K_LINK, "Back", NULL, NULL, NULL, NULL, NULL, P_HISTORY};
+        make_row(&b, fi++, 1);
+        break;
+    }
+    case P_HIST_ITEM: {
+        lv_label_set_text(g_title, "Delete command");
+        dm_history_load();
+        static const item_t q = {K_INFO, "Delete this saved command?", NULL, NULL, NULL, NULL, NULL, 0};
+        static item_t cmd = {K_INFO, "", NULL, NULL, NULL, NULL, NULL, 0};
+        static const item_t d = {K_BUTTON, "Delete", NULL, NULL, NULL, NULL, NULL, ACT_HIST_DEL};
+        static const item_t b = {K_LINK, "Back", NULL, NULL, NULL, NULL, NULL, P_HIST_LIST};
+        cmd.label = dm_history_item(g_hist_sel);
+        make_row(&q, 0, 0);
+        lv_obj_t *r = make_row(&cmd, 0, 0);                 /* the whole command, wrapped */
+        lv_obj_t *l = lv_obj_get_child(r, 0);
+        lv_obj_set_width(l, LV_PCT(100));
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(l, lv_color_hex(C_ACC), 0);
+        lv_obj_set_height(r, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_ver(r, 3, 0);
+        make_row(&d, 0, 1); make_row(&b, 1, 1);
+        break;
+    }
+    case P_HIST_CLEAR: {
+        lv_label_set_text(g_title, "Clear history");
+        static char msg[48];
+        int n = dm_history_count();
+        snprintf(msg, sizeof msg, "Delete all %d saved command%s?", n, n == 1 ? "" : "s");
+        static item_t m = {K_INFO, "", NULL, NULL, NULL, NULL, NULL, 0};
+        static const item_t w = {K_INFO, "This can't be undone.", NULL, NULL, NULL, NULL, NULL, 0};
+        static const item_t y = {K_BUTTON, "Yes, clear history", NULL, NULL, NULL, NULL, NULL, ACT_CLEAR_HIST};
+        static const item_t b = {K_LINK, "Back", NULL, NULL, NULL, NULL, NULL, P_HISTORY};
+        m.label = msg;
+        make_row(&m, 0, 0); make_row(&w, 0, 0);
+        make_row(&b, 0, 1); make_row(&y, 1, 1);            /* Back first: Enter alone won't clear */
         break;
     }
     case P_DONE: {

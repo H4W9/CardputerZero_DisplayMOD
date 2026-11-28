@@ -27,6 +27,12 @@ int dm_status(dm_pair_t *out, int max);
 /* BigTermCLI history (the user's own file, no root needed). */
 int dm_history_count(void);
 void dm_history_clear(void);
+/* Read the saved commands; returns how many. Item 0 is the newest. The
+ * strings stay valid until the next load or delete. */
+int dm_history_load(void);
+const char *dm_history_item(int i);
+/* Delete saved command i (as numbered by the last load). 0 on success. */
+int dm_history_delete(int i);
 /* 1 if the EXT display driver is loaded. */
 int dm_panel_up(void);
 /* EXT display state: 1 = detected and running, 0 = off, -1 = not detected. */

@@ -174,17 +174,75 @@ static void hist_path(char *out, size_t n, const char *suffix)
     snprintf(out, n, "%s/.local/share/displaymod/bigterm_history%s", home ? home : "/tmp", suffix);
 }
 
-int dm_history_count(void)
+/* The file as lines. Bash writes "#<seconds>" before a command when
+ * HISTTIMEFORMAT is set; those belong to the command after them. */
+static char **g_hl;              /* all lines */
+static int g_hn;
+static int *g_he, g_en;          /* line index of each command, oldest first */
+
+static int is_stamp(const char *s)
 {
+    if (s[0] != '#' || !s[1]) return 0;
+    for (s++; *s; s++) if (*s < '0' || *s > '9') return 0;
+    return 1;
+}
+
+int dm_history_load(void)
+{
+    for (int i = 0; i < g_hn; i++) free(g_hl[i]);
+    free(g_hl); free(g_he);
+    g_hl = NULL; g_he = NULL; g_hn = g_en = 0;
     char p[256];
     hist_path(p, sizeof p, "");
     FILE *f = fopen(p, "r");
     if (!f) return 0;
-    int n = 0, c, last = '\n';
-    while ((c = fgetc(f)) != EOF) { if (c == '\n') n++; last = c; }
-    if (last != '\n') n++;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t len;
+    int max = 0;
+    while ((len = getline(&line, &cap, f)) >= 0) {
+        if (len && line[len - 1] == '\n') line[--len] = 0;
+        if (g_hn == max) {
+            max = max ? max * 2 : 256;
+            g_hl = realloc(g_hl, max * sizeof *g_hl);
+            g_he = realloc(g_he, max * sizeof *g_he);
+        }
+        if (!is_stamp(line)) g_he[g_en++] = g_hn;
+        g_hl[g_hn++] = strdup(line);
+    }
+    free(line);
     fclose(f);
-    return n;
+    return g_en;
+}
+
+const char *dm_history_item(int i)
+{
+    return i >= 0 && i < g_en ? g_hl[g_he[g_en - 1 - i]] : "";
+}
+
+int dm_history_delete(int i)
+{
+    if (i < 0 || i >= g_en) return -1;
+    int cmd = g_he[g_en - 1 - i];
+    int from = cmd > 0 && is_stamp(g_hl[cmd - 1]) ? cmd - 1 : cmd;
+    char p[256], tmp[264];
+    hist_path(p, sizeof p, "");
+    snprintf(tmp, sizeof tmp, "%s.new", p);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return -1;
+    for (int l = 0; l < g_hn; l++)
+        if (l < from || l > cmd) fprintf(f, "%s\n", g_hl[l]);
+    if (fclose(f) != 0 || rename(tmp, p) != 0) { unlink(tmp); return -1; }
+    hist_path(p, sizeof p, ".reload");        /* running shell reloads at its next prompt */
+    f = fopen(p, "w");
+    if (f) fclose(f);
+    dm_history_load();
+    return 0;
+}
+
+int dm_history_count(void)
+{
+    return dm_history_load();
 }
 
 void dm_history_clear(void)

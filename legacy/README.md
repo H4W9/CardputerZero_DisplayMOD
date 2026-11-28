@@ -13,7 +13,7 @@ Second screen for the M5Stack CardputerZero. DisplayMOD drives a 2.8" ILI9341 SP
 - 12- or 24-hour clock in the status bar and on BigTermCLI's built-in screen page
 - Layouts: status bar, stretch, or no bar with top/center/bottom position and a border color
 - BigTermCLI: terminal on the EXT display with the same keys and colors as the CLI app, starting in your home folder
-- Command history in BigTermCLI, saved after every command and kept across reboots
+- Command history in BigTermCLI, saved after every command and kept across reboots. View the saved commands, delete single ones, or clear them all (asks first)
 - Brightness follows the built-in screen, or set it yourself (10–100%)
 - Option to keep the built-in screen off while mirroring, with an idle sleep timer (BigTermCLI has its own setting for the built-in screen)
 - EXT display detection at boot; if nothing is connected, the 5V output and driver stay off
@@ -42,7 +42,7 @@ Leave the touch (T_*) and SD pins unconnected and don't use pin 2 (5V in). Power
 Copy the `.deb` to the CardputerZero, then:
 
 ```
-sudo apt install ./displaymod_2.9.0_arm64.deb
+sudo apt install ./displaymod_2.9.1_arm64.deb
 sudo reboot
 ```
 

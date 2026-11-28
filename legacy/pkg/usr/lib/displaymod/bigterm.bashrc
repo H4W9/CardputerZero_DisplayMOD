@@ -4,9 +4,10 @@
 # shellcheck disable=SC1091
 [ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
 
-__dm_conf() { sed -n "s/^$1=//p" /etc/displaymod.conf 2>/dev/null; }
+__dm_conf() { sed -n "s/^$1=//p" /etc/displaymod/displaymod.conf /etc/displaymod.conf 2>/dev/null | head -n 1; }
 __dm_dir="$HOME/.local/share/displaymod"
 __dm_clear="$__dm_dir/bigterm_history.clear"
+__dm_reload="$__dm_dir/bigterm_history.reload"
 mkdir -p "$__dm_dir"
 
 HISTSIZE=$(__dm_conf HIST_SIZE); HISTSIZE=${HISTSIZE:-1000}
@@ -19,9 +20,14 @@ else
   shopt -s histappend
 fi
 
-# After each command: honor a "clear history" request from DisplayMOD, then save.
+# After each command: honor a "clear history" request from DisplayMOD, save,
+# and reload the file if DisplayMOD deleted a command from it.
 __dm_history() {
   if [ -e "$__dm_clear" ]; then history -c; rm -f "$__dm_clear"; fi
   [ -n "$HISTFILE" ] && history -a
+  if [ -e "$__dm_reload" ]; then
+    rm -f "$__dm_reload"
+    [ -n "$HISTFILE" ] && { history -c; history -r; }
+  fi
 }
 PROMPT_COMMAND="__dm_history${PROMPT_COMMAND:+; $PROMPT_COMMAND}"

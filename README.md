@@ -12,7 +12,7 @@ Second screen for the M5Stack CardputerZero. DisplayMOD drives a 2.8" ILI9341 SP
 - 12- or 24-hour clock in the status bar and on BigTermCLI's built-in screen page
 - Layouts: status bar, stretch, or no bar with top/center/bottom position and a border color
 - BigTermCLI: terminal on the EXT display with the same keys and colors as the CLI app, starting in your home folder
-- Command history in BigTermCLI, saved after every command and kept across reboots
+- Command history in BigTermCLI, saved after every command and kept across reboots. View the saved commands, delete single ones, or clear them all (asks first)
 - Brightness follows the built-in screen, or set it yourself (10–100%)
 - Option to keep the built-in screen off while mirroring, with an idle sleep timer (BigTermCLI has its own setting for the built-in screen)
 - EXT display detection at boot; if nothing is connected, the 5V output and driver stay off
@@ -41,7 +41,7 @@ Leave the touch (T_*) and SD pins unconnected and don't use pin 2 (5V in). Power
 Copy the `.deb` to the CardputerZero, then:
 
 ```
-sudo apt install ./displaymod_3.2.0_arm64.deb
+sudo apt install ./displaymod_3.2.1_arm64.deb
 sudo reboot
 ```
 
@@ -70,6 +70,10 @@ Your 2.x settings are copied to `/etc/displaymod/displaymod.conf` on first start
 Quick settings (brightness, border color, sleep, built-in screen, history) apply at once. Settings that restart the EXT display (mirroring, layout, position, rotation, font, SPI speed, color swap, detection) are queued and shown in amber; press **A** or choose **Apply changes** to apply them together. The `displaymod` command works the same way, with **p** to apply.
 
 ![Queued change](screenshots/app_queued.png)
+
+**BigTermCLI history** lists the saved commands, newest first. Press Enter on one to delete it. **Clear history...** asks before it deletes them all. A BigTermCLI shell that is already open picks up the change at its next prompt. In the `displaymod` command, it's History → [4] (view, press a number to delete) and [5] (clear).
+
+![Saved commands](screenshots/app_history_list.png) ![Delete one command](screenshots/app_history_delete.png)
 
 **BigTermCLI**: type on the CardputerZero, read on the EXT display.
 

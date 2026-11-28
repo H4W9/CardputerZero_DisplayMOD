@@ -36,12 +36,15 @@ SHOTS = {
     "queued": ("D D R R snap:queued", {}),                    # layout -> 1:1, no bar (queued)
     "ext_settings": (D(6) + " E snap:ext_settings", {}),
     "history": (D(5) + " E snap:history", {}),
+    "history_list": (D(5) + " E D D D E D snap:history_list", {}),
+    "history_delete": (D(5) + " E D D D E D E snap:history_delete", {}),
+    "history_clear": (D(5) + " E D D D D E snap:history_clear", {}),
     "status": (D(7) + " E snap:status", {}),
     "about": (D(9) + " E snap:about", {}),
     "home": ("snap:home", {"DM_EXT_SIZE": "320x240"}),         # also writes home_ext
 }
 README_SET = ["home", "home_ext", "home_not_detected", "queued", "ext_settings",
-              "history", "status", "about"]
+              "history", "history_list", "history_delete", "history_clear", "status", "about"]
 STORE_SET = ["home", "queued", "ext_settings", "history", "status"]
 
 

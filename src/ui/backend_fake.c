@@ -67,6 +67,34 @@ int dm_panel_state(void)
     return dm_panel_up();
 }
 
-static int g_hist = 42;
-int dm_history_count(void) { return g_hist; }
-void dm_history_clear(void) { g_hist = 0; }
+/* newest first */
+static const char *g_hdemo[] = {
+    "htop", "ls -la ~/Documents", "sudo apt update && sudo apt upgrade",
+    "ping -c 3 192.168.137.1", "python3 ~/scripts/weather.py --city Berlin --units metric --days 3",
+    "git -C ~/src/notes pull", "df -h", "nano ~/.bashrc", "ip addr", "cd ~/Downloads",
+    "uptime", "journalctl -u displaymod -n 40", "cat /proc/cpuinfo", "free -m",
+};
+static int g_hdel[64], g_hnd, g_hcleared;
+static int hdemo_n(void) { return g_hcleared ? 0 : (int)(sizeof g_hdemo / sizeof g_hdemo[0]); }
+
+int dm_history_load(void) { return hdemo_n() - g_hnd; }
+int dm_history_count(void) { return dm_history_load(); }
+void dm_history_clear(void) { g_hcleared = 1; g_hnd = 0; }
+
+static int hdemo_at(int i)          /* index into g_hdemo of the i-th shown item */
+{
+    for (int k = 0; k < hdemo_n(); k++) {
+        int gone = 0;
+        for (int d = 0; d < g_hnd; d++) if (g_hdel[d] == k) gone = 1;
+        if (!gone && i-- == 0) return k;
+    }
+    return -1;
+}
+const char *dm_history_item(int i) { int k = hdemo_at(i); return k < 0 ? "" : g_hdemo[k]; }
+int dm_history_delete(int i)
+{
+    int k = hdemo_at(i);
+    if (k < 0 || g_hnd >= 64) return -1;
+    g_hdel[g_hnd++] = k;
+    return 0;
+}
